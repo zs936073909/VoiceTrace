@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# PyInstaller 构建产物（体积大，不应提交）
+build/
+dist/
+*.spec
+*.manifest
+
+# Inno Setup 安装包产物（体积大，用 Release 方式发布）
+installer_output/
+*.iss
+
+# 数据库与用户数据（运行时生成）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+recordings/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件
+*.tmp
+*.bak
+*.log
+
+# 下载的中文语言文件（属于 Inno Setup 第三方资源）
+ChineseSimplified.isl

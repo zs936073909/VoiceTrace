@@ -1,0 +1,260 @@
+import re
+import json
+import numpy as np
+import librosa
+import webrtcvad
+from voicetrace.utils.audio import count_chinese_chars, count_english_words
+
+
+class Analyzer:
+    def __init__(self):
+        self.vad = webrtcvad.Vad(2)  # aggressiveness 0-3
+
+    def calculate_speech_rate(self, text_count: int, speaking_duration: float, language: str) -> float:
+        if speaking_duration <= 0:
+            return 0.0
+        return (text_count / speaking_duration) * 60
+
+    def detect_pauses(self, samples: np.ndarray, sr: int, frame_duration_ms: int = 30) -> tuple:
+        """Detect pauses using WebRTC VAD.
+
+        Args:
+            samples: int16 numpy array of audio samples
+            sr: sample rate
+            frame_duration_ms: frame size in ms (must be 10/20/30)
+        """
+        if frame_duration_ms not in (10, 20, 30):
+            frame_duration_ms = 30
+
+        frame_size = int(sr * frame_duration_ms / 1000)
+        if frame_size == 0:
+            return 0, 0.0
+
+        pause_count = 0
+        total_pause_duration = 0.0
+        in_pause = False
+        pause_start = 0.0
+
+        for i in range(0, len(samples) - frame_size, frame_size):
+            frame = samples[i:i + frame_size].tobytes()
+            try:
+                is_speech = self.vad.is_speech(frame, sr)
+            except Exception:
+                continue
+
+            time_sec = i / sr
+
+            if not is_speech and not in_pause:
+                in_pause = True
+                pause_start = time_sec
+            elif is_speech and in_pause:
+                in_pause = False
+                pause_count += 1
+                total_pause_duration += time_sec - pause_start
+
+        return pause_count, total_pause_duration
+
+    def denoise_audio(self, y: np.ndarray, sr: int) -> np.ndarray:
+        """简易音频降噪：使用谱减法"""
+        try:
+            # 取前0.5秒作为噪声样本（如果音频够长）
+            noise_len = min(int(0.5 * sr), len(y) // 4)
+            if noise_len < sr * 0.1:
+                return y
+
+            noise_sample = y[:noise_len]
+            noise_stft = librosa.stft(noise_sample)
+            noise_mag = np.mean(np.abs(noise_stft), axis=1, keepdims=True)
+
+            # 全音频谱减
+            stft = librosa.stft(y)
+            mag = np.abs(stft)
+            phase = np.angle(stft)
+
+            # 谱减
+            cleaned_mag = np.maximum(mag - 2 * noise_mag, 0)
+            cleaned_stft = cleaned_mag * np.exp(1j * phase)
+            y_clean = librosa.istft(cleaned_stft)
+
+            # 补齐长度
+            if len(y_clean) < len(y):
+                y_clean = np.pad(y_clean, (0, len(y) - len(y_clean)))
+            else:
+                y_clean = y_clean[:len(y)]
+
+            return y_clean
+        except Exception:
+            return y
+
+    def split_sentences(self, text: str, language: str) -> list:
+        """按标点切分句子"""
+        if not text:
+            return []
+
+        # 中文标点 + 英文标点
+        if language == "chinese":
+            # 按中文句号、问号、感叹号、分号切分
+            parts = re.split(r'[。！？；!?;]+', text)
+        elif language == "english":
+            parts = re.split(r'[.!?;]+', text)
+        else:
+            # 混合：中英文标点都切
+            parts = re.split(r'[。！？；!?;]+', text)
+
+        # 清理空白
+        sentences = [p.strip() for p in parts if p.strip()]
+        return sentences
+
+    def analyze_sentences(self, y: np.ndarray, sr: int, script_text: str, language: str,
+                          total_duration: float) -> list:
+        """逐句分析：按文本切分，估算每句的语速"""
+        sentences = self.split_sentences(script_text, language)
+        if not sentences:
+            return []
+
+        # 按句子数量均分音频时长（简化方案）
+        # 更精确的做法需要强制对齐，这里用均分作为近似
+        results = []
+        n = len(sentences)
+        segment_duration = total_duration / n if n > 0 else total_duration
+
+        y_int16 = (y * 32767).astype(np.int16)
+
+        for i, sentence in enumerate(sentences):
+            start_sample = int(i * segment_duration * sr)
+            end_sample = int((i + 1) * segment_duration * sr)
+            segment = y_int16[start_sample:end_sample]
+
+            if len(segment) == 0:
+                continue
+
+            # 计算该段的停顿
+            try:
+                pause_count, pause_dur = self.detect_pauses(segment, sr)
+            except Exception:
+                pause_count, pause_dur = 0, 0.0
+
+            speaking_dur = max(0.1, segment_duration - pause_dur)
+
+            # 计算该句字数
+            if language == "chinese":
+                char_count = count_chinese_chars(sentence)
+            elif language == "english":
+                char_count = count_english_words(sentence)
+            else:
+                char_count = count_chinese_chars(sentence) + count_english_words(sentence)
+
+            rate = self.calculate_speech_rate(char_count, speaking_dur, language)
+
+            results.append({
+                "index": i + 1,
+                "sentence": sentence[:50] + ("..." if len(sentence) > 50 else ""),
+                "char_count": char_count,
+                "rate": round(rate, 1),
+                "pause_count": pause_count,
+                "pause_duration": round(pause_dur, 2),
+                "start_time": round(i * segment_duration, 2),
+                "end_time": round((i + 1) * segment_duration, 2),
+            })
+
+        return results
+
+    def get_waveform_data(self, y: np.ndarray, max_points: int = 2000) -> list:
+        """获取波形数据（降采样用于可视化）"""
+        if len(y) > max_points:
+            # 降采样
+            step = len(y) // max_points
+            y_down = y[::step]
+        else:
+            y_down = y
+
+        # 归一化到 -1 到 1
+        max_val = np.max(np.abs(y_down)) if np.max(np.abs(y_down)) > 0 else 1
+        y_norm = y_down / max_val
+
+        return y_norm.tolist()
+
+    def get_spectrogram_data(self, y: np.ndarray, sr: int) -> dict:
+        """获取梅尔频谱图数据"""
+        try:
+            # 计算梅尔频谱
+            S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=64, fmax=8000)
+            S_dB = librosa.power_to_db(S, ref=np.max)
+
+            # 降采样：时间轴取 100 个点
+            n_time = S_dB.shape[1]
+            if n_time > 100:
+                step = n_time // 100
+                S_dB = S_dB[:, ::step]
+
+            return {
+                "data": S_dB.tolist(),
+                "n_mels": S_dB.shape[0],
+                "n_frames": S_dB.shape[1],
+                "sr": sr
+            }
+        except Exception:
+            return {"data": [], "n_mels": 0, "n_frames": 0, "sr": sr}
+
+    def analyze(self, audio_path: str, script_text: str, language: str,
+                denoise: bool = False) -> dict:
+        # Load audio once with librosa
+        y, sr = librosa.load(audio_path, sr=None)
+        duration = librosa.get_duration(y=y, sr=sr)
+
+        # 降噪
+        if denoise:
+            y = self.denoise_audio(y, sr)
+
+        # Convert to int16 for WebRTC VAD (load once, reuse)
+        y_int16 = (y * 32767).astype(np.int16)
+        pause_count, total_pause_duration = self.detect_pauses(y_int16, sr)
+
+        # Guard against negative speaking duration
+        speaking_duration = max(0.1, duration - total_pause_duration)
+
+        # Count text
+        if language == "chinese":
+            text_count = count_chinese_chars(script_text)
+        elif language == "english":
+            text_count = count_english_words(script_text)
+        else:
+            text_count = count_chinese_chars(script_text) + count_english_words(script_text)
+
+        # Speech rate
+        speech_rate = self.calculate_speech_rate(text_count, speaking_duration, language)
+
+        # RMS energy
+        rms_energy = float(np.mean(librosa.feature.rms(y=y)))
+
+        # MFCC features —统一用 float64 存储
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_features = np.mean(mfcc, axis=1).astype(np.float64).tobytes()
+
+        # Spectral features
+        spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+        spectral_bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
+        spectral_features = np.array([
+            np.mean(spectral_centroid), np.mean(spectral_bandwidth)
+        ]).astype(np.float64).tobytes()
+
+        # 逐句分析
+        sentence_analysis = self.analyze_sentences(y, sr, script_text, language, duration)
+        sentence_analysis_json = json.dumps(sentence_analysis, ensure_ascii=False) if sentence_analysis else None
+
+        # 波形和频谱图数据（用于可视化）
+        waveform = self.get_waveform_data(y)
+        spectrogram = self.get_spectrogram_data(y, sr)
+
+        return {
+            "speech_rate": speech_rate,
+            "pause_count": pause_count,
+            "total_pause_duration": total_pause_duration,
+            "rms_energy": rms_energy,
+            "mfcc_features": mfcc_features,
+            "spectral_features": spectral_features,
+            "sentence_analysis_json": sentence_analysis_json,
+            "waveform": waveform,
+            "spectrogram": spectrogram,
+            "duration": duration,
+        }
