@@ -1,43 +1,44 @@
 # VoiceTrace 声迹
 
-> **语音档案智能追踪系统** — 面向播音主持专业学习者及语音训练需求的桌面应用
+> **语音档案智能追踪系统 v2.0**
+> 面向播音主持专业学习者及语音训练需求的桌面应用
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
-[![PySide6](https://img.shields.io/badge/PySide6-6.6+-green.svg)](https://www.qt.io)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blueviolet.svg)](#)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
----
+[![Release](https://img.shields.io/github/v/release/zs936073909/VoiceTrace)](https://github.com/zs936073909/VoiceTrace/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## 简介
 
-VoiceTrace（声迹）是一款专为播音主持专业学生（如浙江传媒大学双播专业）及有语音训练需求的用户设计的桌面应用。它能帮你：
+VoiceTrace 声迹是一款专为播音主持专业学生及语音训练需求者设计的桌面应用，集成了录音、智能分析、台风训练、文案写作等全流程训练工具。
 
-- 📝 **管理稿件** — 分类管理新闻播报、即兴评述、模拟主持等训练稿件
-- 🎙️ **录音标记** — 录音时一键标记卡顿点，回放可快速跳转
+## 核心功能
+
+- 📝 **稿件管理** — 4 种分类（新闻播报/即兴评述/模拟主持/自定义），3 种语言，自定义语速标准
+- 🎤 **专业录音** — WAV 16kHz 高质量录音，**空格键**一键标记卡顿，回放可快速跳转
 - 📊 **智能分析** — 自动计算语速、停顿、能量，判断是否符合行业标准
 - 🎧 **跟读模式** — 选示范录音 → 跟读 → AI 对比相似度，给出改进建议
 - 📈 **趋势追踪** — 多次录音的语速趋势图，可视化进步轨迹
 - 📅 **训练打卡** — 日历视图 + 连续打卡统计，养成练习习惯
 - 📤 **数据导出** — 支持 CSV / JSON / PDF 三种格式
+- 🎬 **台风训练（v2.0 新增）** — 基于 MediaPipe 的镜头感 + 肢体语言分析，支持站姿/坐姿双模式，6 维雷达图评分
+- ✍️ **文案写作（v2.0 新增）** — 9 套专业模板 + AI 智能生成，兼容 OpenAI/DeepSeek/Moonshot/通义千问
 
 ## 截图
 
-> 软件包含 7 个功能标签页：稿件管理 / 录音 / 分析 / 跟读模式 / 对比 / 训练打卡 / 导出
+> 软件包含 9 个功能标签页：稿件管理 / 录音 / 分析 / 跟读模式 / 对比 / 训练打卡 / 导出 / **台风训练** / **文案写作**
 
 ## 快速开始
 
-### 方式一：使用安装包（推荐普通用户）
+### 方式一：使用便携版（推荐普通用户）
 
-1. 前往 [Releases](../../releases) 下载最新的 `VoiceTrace_Setup_v1.0.0.exe`
-2. 双击安装
-3. 参考随包附带的「使用指南.md」
+1. 前往 [Releases](../../releases) 下载最新的 `VoiceTrace-v2.0-portable.zip`
+2. 解压到任意目录
+3. 双击 `VoiceTrace.exe` 运行
 
 ### 方式二：从源码运行（推荐开发者）
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/你的用户名/VoiceTrace.git
+git clone https://github.com/zs936073909/VoiceTrace.git
 cd VoiceTrace
 
 # 2. 安装依赖
@@ -48,6 +49,29 @@ python main.py
 ```
 
 **系统要求**：Python 3.10+，Windows 10/11 64 位
+
+## v2.0 新增功能详解
+
+### 台风训练
+
+通过摄像头实时分析你的**镜头感**和**肢体语言**：
+
+| 维度 | 说明 |
+|---|---|
+| 眼神交流 | 虹膜追踪，判断是否直视镜头 |
+| 表情管理 | 微笑度 + 紧张度识别 |
+| 头部姿态 | yaw/pitch/roll 三维估计 |
+| 站姿/坐姿 | 站姿检测倾斜，坐姿额外检测探颈 |
+| 手势 | 手腕运动幅度分析 |
+| 稳定性 | 身体晃动幅度 |
+
+支持**站姿**和**坐姿**两种模式，针对不同训练场景优化（电脑前日常练习选坐姿，模拟演讲选站姿）。
+
+### 文案写作
+
+- **模板生成**：9 套专业模板（新闻播报、即兴评述、模拟主持、演讲），离线可用
+- **AI 智能生成**：支持任何兼容 OpenAI 格式的 API（DeepSeek、Moonshot、通义千问等）
+- **保存为稿件**：一键导入稿件管理，方便后续录音练习
 
 ## 功能特性
 
@@ -60,6 +84,8 @@ python main.py
 | 对比 | 任意两条录音对比，相似度 + 语速差 + 卡顿差 |
 | 训练打卡 | 统计卡片、打卡日历、手动打卡、训练记录表 |
 | 导出 | CSV / JSON / PDF，可导出分析/稿件/对比记录 |
+| 台风训练 | 6 维评分、雷达图可视化、坐姿/站姿双模式、训练历史 |
+| 文案写作 | 模板库 + AI 生成、双语支持、一键保存为稿件 |
 
 ## 内置语速标准
 
@@ -85,10 +111,11 @@ python main.py
 |---|---|
 | 界面框架 | PySide6 (Qt 6) |
 | 音频分析 | librosa、webrtcvad、pydub |
+| 台风分析 | MediaPipe Face Mesh + Pose |
 | 机器学习 | scikit-learn（余弦相似度） |
 | 数据库 | SQLite 3 |
 | 报告导出 | reportlab（PDF）、原生 CSV/JSON |
-| 打包 | PyInstaller + Inno Setup |
+| 打包 | PyInstaller |
 
 ## 项目结构
 
@@ -97,13 +124,16 @@ voicetrace/
 ├── main.py                  # 程序入口
 ├── requirements.txt         # 依赖列表
 ├── build_windows.py         # PyInstaller 打包脚本
-├── voicetrace_installer.iss # Inno Setup 安装包脚本
 ├── config/
-│   └── defaults.json        # 默认配置
+│   ├── defaults.json        # 默认配置
+│   └── script_templates.json  # 文案模板库
 ├── core/                    # 核心算法
 │   ├── analyzer.py          # 音频分析（语速、卡顿、MFCC、降噪）
 │   ├── comparator.py        # 相似度对比
-│   └── standards.py         # 语速标准
+│   ├── standards.py         # 语速标准
+│   ├── posture_analyzer.py  # 面部分析
+│   ├── pose_analyzer.py     # 身体姿态分析
+│   └── script_writer.py     # 文案生成
 ├── data/                    # 数据层
 │   ├── database.py          # SQLite CRUD
 │   └── models.py            # 数据模型
@@ -116,6 +146,10 @@ voicetrace/
 │   ├── comparison_view.py   # 对比视图
 │   ├── progress_view.py     # 训练打卡
 │   ├── export_dialog.py     # 导出对话框
+│   ├── camera_view.py       # 摄像头预览
+│   ├── posture_view.py      # 台风训练视图
+│   ├── radar_chart.py       # 雷达图组件
+│   ├── script_writer_view.py  # 文案写作界面
 │   └── styles.py            # QSS 样式（浅色/深色）
 ├── utils/                   # 工具
 │   ├── audio.py             # 中英文字数统计
@@ -129,14 +163,12 @@ voicetrace/
 
 ```bash
 # 1. 安装打包依赖
-pip install pyinstaller inno-setup
+pip install pyinstaller
 
 # 2. PyInstaller 打包
 python build_windows.py
 
-# 3. 生成安装包（需 Inno Setup 6）
-ISCC.exe voicetrace_installer.iss
-# 输出：installer_output/VoiceTrace_Setup_v1.0.0.exe
+# 输出：dist/VoiceTrace/VoiceTrace.exe
 ```
 
 ## 数据存储
@@ -152,5 +184,5 @@ MIT License — 可自由使用、修改、分发
 
 ## 致谢
 
-- 浙江传媒大学双播专业的需求启发
+- 基于 mimocode 2.5pro 开发第一版，trae glm5.2 开发第二版以及架构优化
 - 所有开源依赖库的作者
