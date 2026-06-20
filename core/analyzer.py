@@ -5,10 +5,13 @@ import librosa
 import webrtcvad
 from voicetrace.utils.audio import count_chinese_chars, count_english_words
 
+from voicetrace.core.prosody_analyzer import ProsodyAnalyzer, is_parselmouth_available
+
 
 class Analyzer:
     def __init__(self):
         self.vad = webrtcvad.Vad(2)  # aggressiveness 0-3
+        self.prosody_analyzer = ProsodyAnalyzer() if is_parselmouth_available() else None
 
     def calculate_speech_rate(self, text_count: int, speaking_duration: float, language: str) -> float:
         if speaking_duration <= 0:
@@ -246,6 +249,14 @@ class Analyzer:
         waveform = self.get_waveform_data(y)
         spectrogram = self.get_spectrogram_data(y, sr)
 
+        # 韵律特征
+        prosody = None
+        if self.prosody_analyzer is not None:
+            try:
+                prosody = self.prosody_analyzer.analyze(y, sr, language).to_dict()
+            except Exception:
+                prosody = None
+
         return {
             "speech_rate": speech_rate,
             "pause_count": pause_count,
@@ -257,4 +268,5 @@ class Analyzer:
             "waveform": waveform,
             "spectrogram": spectrogram,
             "duration": duration,
+            "prosody": prosody,
         }

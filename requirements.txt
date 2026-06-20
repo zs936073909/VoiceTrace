@@ -13,5 +13,8 @@ pyinstaller>=6.0.0
 mediapipe>=0.10.14
 opencv-python>=4.8.0
 
+# 韵律分析（基于 Praat 的基频、共振峰、声音质量分析）
+praat-parselmouth>=0.4.7
+
 # AI 文案写作（可选依赖：使用在线 API 智能生成时需要）
 requests>=2.31.0

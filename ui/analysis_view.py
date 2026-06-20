@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
     QMessageBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QSlider, QGroupBox, QCheckBox
 )
-from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QScatterSeries
+from PySide6.QtCore import Qt, QUrl, QPointF
 from PySide6.QtGui import QPainter, QColor, QPen
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
@@ -149,7 +149,7 @@ class AnalysisView(QWidget):
         playback_layout.addWidget(self.play_time_label)
         layout.addLayout(playback_layout)
 
-        # 子标签页：趋势图 / 波形 / 逐句分析
+        # 子标签页：趋势图 / 波形 / 逐句分析 / 韵律
         self.sub_tabs = QTabWidget()
 
         # 趋势图
@@ -174,6 +174,26 @@ class AnalysisView(QWidget):
         self.sentence_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.sentence_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.sub_tabs.addTab(self.sentence_table, "逐句分析")
+
+        # 韵律分析
+        self.prosody_chart = QChart()
+        self.prosody_chart.setTitle("基频 (F0) 曲线")
+        self.prosody_chart.legend().hide()
+        self.prosody_chart_view = QChartView(self.prosody_chart)
+        self.prosody_chart_view.setRenderHint(QPainter.Antialiasing)
+        self.prosody_chart_view.setMinimumHeight(250)
+
+        self.prosody_table = QTableWidget()
+        self.prosody_table.setColumnCount(2)
+        self.prosody_table.setHorizontalHeaderLabels(["韵律指标", "数值"])
+        self.prosody_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.prosody_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+
+        prosody_widget = QWidget()
+        prosody_layout = QVBoxLayout(prosody_widget)
+        prosody_layout.addWidget(self.prosody_chart_view)
+        prosody_layout.addWidget(self.prosody_table)
+        self.sub_tabs.addTab(prosody_widget, "韵律分析")
 
         layout.addWidget(self.sub_tabs)
 
@@ -240,7 +260,8 @@ class AnalysisView(QWidget):
                 rms_energy=result["rms_energy"],
                 mfcc_features=result["mfcc_features"],
                 spectral_features=result["spectral_features"],
-                sentence_analysis_json=result["sentence_analysis_json"]
+                sentence_analysis_json=result["sentence_analysis_json"],
+                prosody_json=json.dumps(result.get("prosody"), ensure_ascii=False) if result.get("prosody") else None
             )
             self.db.create_analysis(analysis)
 
@@ -271,6 +292,9 @@ class AnalysisView(QWidget):
 
             # 更新逐句分析表
             self._update_sentence_table(result.get("sentence_analysis_json"))
+
+            # 更新韵律分析
+            self._update_prosody(result.get("prosody"))
 
         except Exception as e:
             QMessageBox.critical(self, "分析失败", f"分析出错: {e}")
@@ -328,6 +352,82 @@ class AnalysisView(QWidget):
         axis_y.setRange(max(0, min_rate), max_rate)
         self.chart.addAxis(axis_y, Qt.AlignLeft)
         series.attachAxis(axis_y)
+
+    def _update_prosody(self, prosody: dict):
+        """更新韵律分析视图"""
+        # 清空
+        self.prosody_chart.removeAllSeries()
+        for axis in self.prosody_chart.axes():
+            self.prosody_chart.removeAxis(axis)
+        self.prosody_table.setRowCount(0)
+
+        if not prosody:
+            self.prosody_table.setRowCount(1)
+            self.prosody_table.setItem(0, 0, QTableWidgetItem("状态"))
+            self.prosody_table.setItem(0, 1, QTableWidgetItem("未检测到韵律数据"))
+            return
+
+        # 绘制 F0 曲线
+        f0_times = json.loads(prosody.get("f0_times_json", "[]"))
+        f0_values = json.loads(prosody.get("f0_values_json", "[]"))
+
+        if len(f0_times) > 0 and len(f0_values) > 0:
+            series = QLineSeries()
+            series.setName("F0")
+            pen = QPen(QColor("#2980b9"))
+            pen.setWidth(1.5)
+            series.setPen(pen)
+
+            for t, v in zip(f0_times, f0_values):
+                if v > 0:
+                    series.append(float(t), float(v))
+
+            self.prosody_chart.addSeries(series)
+
+            axis_x = QValueAxis()
+            axis_x.setTitleText("时间 (s)")
+            axis_x.setRange(0, max(f0_times))
+            self.prosody_chart.addAxis(axis_x, Qt.AlignBottom)
+            series.attachAxis(axis_x)
+
+            valid_values = [v for v in f0_values if v > 0]
+            axis_y = QValueAxis()
+            axis_y.setTitleText("基频 (Hz)")
+            if valid_values:
+                axis_y.setRange(max(0, min(valid_values) - 20), max(valid_values) + 20)
+            self.prosody_chart.addAxis(axis_y, Qt.AlignLeft)
+            series.attachAxis(axis_y)
+
+        # 填充指标表
+        rows = [
+            ("平均基频 (Hz)", prosody.get("f0_mean")),
+            ("基频标准差 (Hz)", prosody.get("f0_std")),
+            ("基频范围 (Hz)", prosody.get("f0_range")),
+            ("语调斜率均值", prosody.get("f0_slope_mean")),
+            ("上升段数", prosody.get("f0_rise_count")),
+            ("下降段数", prosody.get("f0_fall_count")),
+            ("平均强度 (dB)", prosody.get("intensity_mean")),
+            ("强度动态范围 (dB)", prosody.get("intensity_range")),
+            ("第一共振峰 F1 (Hz)", prosody.get("formant_mean_1")),
+            ("第二共振峰 F2 (Hz)", prosody.get("formant_mean_2")),
+            ("第三共振峰 F3 (Hz)", prosody.get("formant_mean_3")),
+            ("谐噪比 HNR (dB)", prosody.get("hnr_mean")),
+            ("频率微扰 Jitter (%)", prosody.get("jitter")),
+            ("振幅微扰 Shimmer (%)", prosody.get("shimmer")),
+            ("声调稳定性", prosody.get("tone_stability")),
+            ("声调得分", prosody.get("tone_score")),
+        ]
+
+        self.prosody_table.setRowCount(len(rows))
+        for i, (label, value) in enumerate(rows):
+            self.prosody_table.setItem(i, 0, QTableWidgetItem(label))
+            if value is None:
+                text = "--"
+            elif isinstance(value, float):
+                text = f"{value:.2f}"
+            else:
+                text = str(value)
+            self.prosody_table.setItem(i, 1, QTableWidgetItem(text))
 
     # ---- 回放 ----
 

@@ -38,6 +38,8 @@ class Analysis:
     mfcc_features: Optional[bytes] = None
     spectral_features: Optional[bytes] = None
     sentence_analysis_json: Optional[str] = None  # JSON: [{sentence, rate, pause_count}, ...]
+    # 韵律特征 JSON
+    prosody_json: Optional[str] = None  # JSON: ProsodyFeatures.to_dict()
     id: Optional[int] = None
 
 

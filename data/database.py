@@ -58,6 +58,7 @@ class Database:
                 mfcc_features BLOB,
                 spectral_features BLOB,
                 sentence_analysis_json TEXT,
+                prosody_json TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
             );
@@ -124,6 +125,10 @@ class Database:
         """Add columns if they don't exist (for existing databases)."""
         try:
             self.conn.execute("ALTER TABLE analyses ADD COLUMN sentence_analysis_json TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE analyses ADD COLUMN prosody_json TEXT")
         except sqlite3.OperationalError:
             pass
         self.conn.commit()
@@ -259,12 +264,12 @@ class Database:
         cursor = self.conn.execute(
             """INSERT INTO analyses (recording_id, speech_rate, pause_count,
                total_pause_duration, rms_energy, mfcc_features, spectral_features,
-               sentence_analysis_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               sentence_analysis_json, prosody_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (analysis.recording_id, analysis.speech_rate, analysis.pause_count,
              analysis.total_pause_duration, analysis.rms_energy,
              analysis.mfcc_features, analysis.spectral_features,
-             analysis.sentence_analysis_json)
+             analysis.sentence_analysis_json, analysis.prosody_json)
         )
         self.conn.commit()
         return cursor.lastrowid
@@ -282,7 +287,8 @@ class Database:
                 rms_energy=row["rms_energy"],
                 mfcc_features=row["mfcc_features"],
                 spectral_features=row["spectral_features"],
-                sentence_analysis_json=row["sentence_analysis_json"]
+                sentence_analysis_json=row["sentence_analysis_json"],
+                prosody_json=row["prosody_json"]
             )
         return None
 
@@ -299,7 +305,8 @@ class Database:
                 rms_energy=r["rms_energy"],
                 mfcc_features=r["mfcc_features"],
                 spectral_features=r["spectral_features"],
-                sentence_analysis_json=r["sentence_analysis_json"]
+                sentence_analysis_json=r["sentence_analysis_json"],
+                prosody_json=r["prosody_json"]
             )
             for r in rows
         ]
