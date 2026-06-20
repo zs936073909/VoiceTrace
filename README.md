@@ -60,7 +60,7 @@ VoiceTrace 声迹是一款专为播音主持专业学生及语音训练需求者
 
 ### 方式一：使用便携版（推荐普通用户）
 
-1. 前往 [Releases](../../releases) 下载最新的 `VoiceTrace-v3.0-portable.zip`
+1. 前往 [Releases](../../releases) 下载最新的 `VoiceTrace-v3.1.0-portable.zip`
 2. 解压到任意目录
 3. 双击 `VoiceTrace.exe` 运行
 
