@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from voicetrace.data.models import (
     Script, Recording, Stumble, Analysis, Comparison,
-    TrainingSession, CustomStandard
+    TrainingSession, CustomStandard, PostureRecord, ScriptTemplate
 )
 
 
@@ -91,6 +91,32 @@ class Database:
                 rate_max INTEGER NOT NULL,
                 unit TEXT DEFAULT 'CPM'
             );
+            CREATE TABLE IF NOT EXISTS posture_records (
+                id INTEGER PRIMARY KEY,
+                recording_id INTEGER,
+                duration REAL DEFAULT 0,
+                eye_contact_score REAL,
+                expression_score REAL,
+                head_pose_score REAL,
+                posture_score REAL,
+                gesture_score REAL,
+                stability_score REAL,
+                overall_score REAL,
+                details_json TEXT,
+                video_path TEXT,
+                notes TEXT,
+                date TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE SET NULL
+            );
+            CREATE TABLE IF NOT EXISTS script_templates (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                language TEXT NOT NULL,
+                structure_json TEXT,
+                tips TEXT
+            );
         """)
         self.conn.commit()
 
@@ -110,6 +136,8 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_comparisons_recording_id ON comparisons(recording_id);
             CREATE INDEX IF NOT EXISTS idx_comparisons_baseline_id ON comparisons(baseline_id);
             CREATE INDEX IF NOT EXISTS idx_training_date ON training_sessions(date);
+            CREATE INDEX IF NOT EXISTS idx_posture_date ON posture_records(date);
+            CREATE INDEX IF NOT EXISTS idx_posture_recording_id ON posture_records(recording_id);
         """)
         self.conn.commit()
 
@@ -383,6 +411,82 @@ class Database:
         cursor = self.conn.execute("DELETE FROM custom_standards WHERE id=?", (std_id,))
         self.conn.commit()
         return cursor.rowcount > 0
+
+    # ---- PostureRecord CRUD ----
+
+    def create_posture_record(self, record: PostureRecord) -> int:
+        if record.date is None:
+            record.date = datetime.now().strftime("%Y-%m-%d")
+        cursor = self.conn.execute(
+            """INSERT INTO posture_records
+               (recording_id, duration, eye_contact_score, expression_score, head_pose_score,
+                posture_score, gesture_score, stability_score, overall_score,
+                details_json, video_path, notes, date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record.recording_id, record.duration,
+             record.eye_contact_score, record.expression_score, record.head_pose_score,
+             record.posture_score, record.gesture_score, record.stability_score,
+             record.overall_score, record.details_json, record.video_path,
+             record.notes, record.date)
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_posture_record(self, record_id: int) -> Optional[PostureRecord]:
+        row = self.conn.execute(
+            "SELECT * FROM posture_records WHERE id = ?", (record_id,)
+        ).fetchone()
+        if row:
+            return self._row_to_posture_record(row)
+        return None
+
+    def list_posture_records(self, limit: int = 100) -> List[PostureRecord]:
+        rows = self.conn.execute(
+            "SELECT * FROM posture_records ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._row_to_posture_record(r) for r in rows]
+
+    def _row_to_posture_record(self, row) -> PostureRecord:
+        return PostureRecord(
+            id=row["id"], recording_id=row["recording_id"], duration=row["duration"],
+            eye_contact_score=row["eye_contact_score"],
+            expression_score=row["expression_score"],
+            head_pose_score=row["head_pose_score"],
+            posture_score=row["posture_score"],
+            gesture_score=row["gesture_score"],
+            stability_score=row["stability_score"],
+            overall_score=row["overall_score"],
+            details_json=row["details_json"],
+            video_path=row["video_path"],
+            notes=row["notes"], date=row["date"]
+        )
+
+    # ---- ScriptTemplate CRUD ----
+
+    def create_script_template(self, tpl: ScriptTemplate) -> int:
+        cursor = self.conn.execute(
+            "INSERT INTO script_templates (name, category, language, structure_json, tips) VALUES (?, ?, ?, ?, ?)",
+            (tpl.name, tpl.category, tpl.language, tpl.structure_json, tpl.tips)
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def list_script_templates(self, category: Optional[str] = None) -> List[ScriptTemplate]:
+        if category:
+            rows = self.conn.execute(
+                "SELECT * FROM script_templates WHERE category = ? ORDER BY name", (category,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM script_templates ORDER BY name"
+            ).fetchall()
+        return [
+            ScriptTemplate(
+                id=r["id"], name=r["name"], category=r["category"],
+                language=r["language"], structure_json=r["structure_json"], tips=r["tips"]
+            )
+            for r in rows
+        ]
 
     def close(self):
         self.conn.close()

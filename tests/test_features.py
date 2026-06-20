@@ -161,3 +161,162 @@ def test_analyzer_with_wav():
         assert "waveform" in result
         assert "duration" in result
         assert result["duration"] > 1.5
+
+
+# ---- 台风训练功能测试 ----
+
+def test_posture_record_model():
+    """测试 PostureRecord 数据模型"""
+    from voicetrace.data.models import PostureRecord, ScriptTemplate
+    r = PostureRecord(
+        duration=60.0,
+        eye_contact_score=85.0,
+        expression_score=70.0,
+        overall_score=80.0
+    )
+    assert r.duration == 60.0
+    assert r.eye_contact_score == 85.0
+    t = ScriptTemplate(name="测试模板", category="news_broadcast", language="chinese")
+    assert t.name == "测试模板"
+
+
+def test_database_posture_record():
+    """测试台风训练记录 CRUD"""
+    from voicetrace.data.database import Database
+    from voicetrace.data.models import PostureRecord
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        rid = db.create_posture_record(PostureRecord(
+            duration=120.0,
+            eye_contact_score=88.0,
+            expression_score=75.0,
+            head_pose_score=90.0,
+            posture_score=82.0,
+            gesture_score=70.0,
+            stability_score=85.0,
+            overall_score=81.7,
+            details_json='{"test": true}'
+        ))
+        assert rid > 0
+        records = db.list_posture_records()
+        assert len(records) == 1
+        assert records[0].overall_score == 81.7
+        assert records[0].eye_contact_score == 88.0
+        db.close()
+
+
+def test_script_writer_templates():
+    """测试文案模板加载"""
+    from voicetrace.core.script_writer import ScriptWriter
+    w = ScriptWriter()
+    templates = w.load_templates()
+    assert len(templates) > 0
+    # 按类别筛选
+    news = w.get_templates_by_category("news_broadcast", "chinese")
+    assert len(news) >= 2
+    # 获取单个模板
+    t = w.get_template("新闻播报-时政")
+    assert t is not None
+    assert "structure" in t
+
+
+def test_script_writer_generate():
+    """测试模板文案生成"""
+    from voicetrace.core.script_writer import ScriptWriter
+    w = ScriptWriter()
+    result = w.generate_from_template("新闻播报-时政", {
+        "date": "2026年1月1日",
+        "program_name": "新闻联播",
+        "topic": "测试主题",
+        "lead_sentence": "这是导语。",
+        "detail_1": "细节一",
+        "detail_2": "细节二",
+        "detail_3": "细节三"
+    })
+    assert result.success
+    assert "新闻联播" in result.content
+    assert "测试主题" in result.content
+    assert result.source == "template"
+
+
+def test_script_writer_prompt():
+    """测试 AI 提示词构建"""
+    from voicetrace.core.script_writer import ScriptWriter
+    w = ScriptWriter()
+    prompt = w.build_ai_prompt(
+        category="news_broadcast",
+        topic="教育改革",
+        language="chinese",
+        duration="2-3分钟"
+    )
+    assert "新闻播报" in prompt
+    assert "教育改革" in prompt
+    assert "中文" in prompt
+
+
+def test_posture_analyzer_import():
+    """测试面部分析器导入（不依赖摄像头）"""
+    from voicetrace.core.posture_analyzer import (
+        PostureAnalyzer, FrameAnalysis, SessionSummary,
+        is_mediapipe_available
+    )
+    assert PostureAnalyzer is not None
+    assert FrameAnalysis is not None
+    assert SessionSummary is not None
+    # MediaPipe 应该已安装
+    assert is_mediapipe_available()
+
+
+def test_pose_analyzer_modes():
+    """测试身体姿态分析器的坐姿/站姿模式"""
+    from voicetrace.core.pose_analyzer import PoseAnalyzer, PoseSessionSummary
+    # 坐姿模式
+    pa_sitting = PoseAnalyzer(mode="sitting")
+    assert pa_sitting.mode == "sitting"
+    # 站姿模式
+    pa_standing = PoseAnalyzer(mode="standing")
+    assert pa_standing.mode == "standing"
+    # 切换模式
+    pa_sitting.set_mode("standing")
+    assert pa_sitting.mode == "standing"
+
+
+def test_radar_chart_widget():
+    """测试雷达图组件"""
+    import os
+    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from voicetrace.ui.radar_chart import RadarChart
+    chart = RadarChart()
+    chart.set_data(
+        ["眼神", "表情", "姿态", "手势", "稳定", "头部"],
+        [80, 70, 90, 60, 85, 75]
+    )
+    chart.set_theme("dark")
+    chart.set_theme("light")
+    assert chart._labels == ["眼神", "表情", "姿态", "手势", "稳定", "头部"]
+
+
+def test_posture_view_import():
+    """测试台风训练视图导入"""
+    import os
+    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from voicetrace.ui.posture_view import PostureView
+    from voicetrace.ui.script_writer_view import ScriptWriterView
+    assert PostureView is not None
+    assert ScriptWriterView is not None
+
+
+def test_camera_view_import():
+    """测试摄像头视图导入"""
+    import os
+    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from voicetrace.ui.camera_view import CameraView
+    cv = CameraView()
+    assert cv.is_running() is False

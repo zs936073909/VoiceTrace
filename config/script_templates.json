@@ -1,0 +1,192 @@
+{
+  "templates": [
+    {
+      "name": "新闻播报-时政",
+      "category": "news_broadcast",
+      "language": "chinese",
+      "structure": {
+        "开头": "各位观众朋友大家好，今天是{date}，欢迎收看本期{program_name}。",
+        "导语": "首先来关注{topic}。{lead_sentence}",
+        "主体": ["{detail_1}", "{detail_2}", "{detail_3}"],
+        "结尾": "以上就是本期{program_name}的全部内容，感谢您的收看，再会。"
+      },
+      "tips": "语速控制在 280-320 字/分钟，开头结尾平稳，主体部分可适当加重语气。注意断句清晰，关键数据要放慢。",
+      "placeholders": {
+        "date": "播出日期",
+        "program_name": "节目名称",
+        "topic": "新闻主题",
+        "lead_sentence": "导语核心句",
+        "detail_1": "细节一",
+        "detail_2": "细节二",
+        "detail_3": "细节三"
+      }
+    },
+    {
+      "name": "新闻播报-民生",
+      "category": "news_broadcast",
+      "language": "chinese",
+      "structure": {
+        "开头": "观众朋友们好，欢迎收看今天的{program_name}。",
+        "导语": "我们先把目光投向{location}。{event_description}",
+        "主体": ["{background}", "{current_situation}", "{impact}"],
+        "结尾": "我们会持续关注此事的进展，欢迎您明天同一时间继续收看。"
+      },
+      "tips": "民生新闻语速可略快（300-340 字/分钟），语气更亲切自然，避免过度严肃。注意与观众建立情感连接。",
+      "placeholders": {
+        "program_name": "节目名称",
+        "location": "事发地点",
+        "event_description": "事件描述",
+        "background": "事件背景",
+        "current_situation": "当前情况",
+        "impact": "影响分析"
+      }
+    },
+    {
+      "name": "即兴评述-观点类",
+      "category": "improv_commentary",
+      "language": "chinese",
+      "structure": {
+        "破题": "关于{topic}这个话题，我的看法是{viewpoint}。",
+        "分析": ["首先，{reason_1}。", "其次，{reason_2}。", "更重要的是，{reason_3}。"],
+        "例证": "我们可以看到，{example}。这正说明了{conclusion}。",
+        "升华": "因此，{final_view}。谢谢大家。"
+      },
+      "tips": "即兴评述讲究'起承转合'。破题要快（10秒内），分析要有层次（第一第二第三），例证要具体，升华要有高度。整体 2-3 分钟。",
+      "placeholders": {
+        "topic": "评述话题",
+        "viewpoint": "核心观点",
+        "reason_1": "理由一",
+        "reason_2": "理由二",
+        "reason_3": "理由三",
+        "example": "具体事例",
+        "conclusion": "事例结论",
+        "final_view": "升华观点"
+      }
+    },
+    {
+      "name": "即兴评述-现象类",
+      "category": "improv_commentary",
+      "language": "chinese",
+      "structure": {
+        "现象描述": "最近，{phenomenon}引发了广泛关注。",
+        "原因分析": ["表面上看，{surface_reason}。", "但深入思考，{deep_reason}。"],
+        "影响评估": "这种现象带来的影响是{impact}。",
+        "建议": "对此，我认为{suggestion}。"
+      },
+      "tips": "现象类评述要'小切口、深挖掘'。先客观描述现象，再分析深层原因，最后给出建设性意见。避免空泛议论。",
+      "placeholders": {
+        "phenomenon": "社会现象",
+        "surface_reason": "表层原因",
+        "deep_reason": "深层原因",
+        "impact": "影响评估",
+        "suggestion": "建设性建议"
+      }
+    },
+    {
+      "name": "模拟主持-晚会",
+      "category": "mock_host",
+      "language": "chinese",
+      "structure": {
+        "开场": "尊敬的各位领导、亲爱的观众朋友们，大家{greeting_time}好！",
+        "介绍": "这里是{event_name}的现场，我是主持人{host_name}。",
+        "串场": "今天，我们将{event_content}。首先，让我们{first_program}。",
+        "结尾": "感谢大家的到来，{event_name}到此结束，祝大家{blessing}，晚安！"
+      },
+      "tips": "晚会主持语速适中（260-300 字/分钟），声音要有感染力和热情。开场要洪亮，串场要自然流畅，结尾要温暖。",
+      "placeholders": {
+        "greeting_time": "时间问候（上午/下午/晚上）",
+        "event_name": "活动名称",
+        "host_name": "主持人姓名",
+        "event_content": "活动内容",
+        "first_program": "首个节目",
+        "blessing": "祝福语"
+      }
+    },
+    {
+      "name": "模拟主持-访谈",
+      "category": "mock_host",
+      "language": "chinese",
+      "structure": {
+        "开场": "大家好，欢迎收看{program_name}，我是主持人{host_name}。",
+        "介绍嘉宾": "今天我们非常荣幸地邀请到了{guest_intro}。",
+        "提问": "{guest_name}，首先想请问您{question_1}？",
+        "过渡": "刚才您提到{transition_point}，那么{question_2}？",
+        "结尾": "非常感谢{guest_name}的分享，也感谢观众朋友的收看，我们下期再见。"
+      },
+      "tips": "访谈主持语速要慢（240-280 字/分钟），语气要亲切、有倾听感。提问要简洁明了，过渡要自然承接嘉宾的回答。",
+      "placeholders": {
+        "program_name": "节目名称",
+        "host_name": "主持人姓名",
+        "guest_intro": "嘉宾介绍",
+        "guest_name": "嘉宾姓名",
+        "question_1": "第一个问题",
+        "transition_point": "承接点",
+        "question_2": "第二个问题"
+      }
+    },
+    {
+      "name": "演讲-励志类",
+      "category": "speech",
+      "language": "chinese",
+      "structure": {
+        "开场": "大家好，今天我想和大家分享关于{topic}的一些思考。",
+        "故事": "记得{story}。这段经历让我深刻地认识到{insight}。",
+        "观点": ["{point_1}", "{point_2}", "{point_3}"],
+        "号召": "所以，{call_to_action}。谢谢大家！"
+      },
+      "tips": "演讲要有故事感。开场用个人经历引入，观点要有递进，结尾要有号召力。语速变化丰富，关键处停顿。",
+      "placeholders": {
+        "topic": "演讲主题",
+        "story": "个人故事",
+        "insight": "感悟",
+        "point_1": "观点一",
+        "point_2": "观点二",
+        "point_3": "观点三",
+        "call_to_action": "号召行动"
+      }
+    },
+    {
+      "name": "News Broadcast - Politics",
+      "category": "news_broadcast",
+      "language": "english",
+      "structure": {
+        "opening": "Good evening, this is {program_name}. I'm {anchor_name}.",
+        "lead": "Tonight, we begin with {topic}. {lead_sentence}",
+        "body": ["{detail_1}", "{detail_2}", "{detail_3}"],
+        "closing": "That's all for {program_name}. Thank you for watching, and good night."
+      },
+      "tips": "Maintain a steady pace of 150-170 words per minute. Articulate clearly, especially for names and numbers. Use a measured, authoritative tone.",
+      "placeholders": {
+        "program_name": "Program Name",
+        "anchor_name": "Anchor Name",
+        "topic": "News Topic",
+        "lead_sentence": "Lead Sentence",
+        "detail_1": "Detail One",
+        "detail_2": "Detail Two",
+        "detail_3": "Detail Three"
+      }
+    },
+    {
+      "name": "Impromptu Commentary",
+      "category": "improv_commentary",
+      "language": "english",
+      "structure": {
+        "hook": "When it comes to {topic}, I believe {viewpoint}.",
+        "analysis": ["First, {reason_1}.", "Furthermore, {reason_2}.", "Most importantly, {reason_3}."],
+        "example": "Consider {example}. This illustrates {conclusion}.",
+        "conclusion": "Therefore, {final_view}. Thank you."
+      },
+      "tips": "Structure: hook (10 sec), analysis (with signposting), example, conclusion. Total 2-3 minutes. Vary pace for emphasis.",
+      "placeholders": {
+        "topic": "Topic",
+        "viewpoint": "Main Viewpoint",
+        "reason_1": "First Reason",
+        "reason_2": "Second Reason",
+        "reason_3": "Third Reason",
+        "example": "Specific Example",
+        "conclusion": "Conclusion",
+        "final_view": "Final View"
+      }
+    }
+  ]
+}

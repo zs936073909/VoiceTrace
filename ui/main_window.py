@@ -13,6 +13,8 @@ from voicetrace.ui.comparison_view import ComparisonView
 from voicetrace.ui.follow_read_view import FollowReadView
 from voicetrace.ui.progress_view import ProgressView
 from voicetrace.ui.export_dialog import ExportDialog
+from voicetrace.ui.posture_view import PostureView
+from voicetrace.ui.script_writer_view import ScriptWriterView
 from voicetrace.ui.styles import LIGHT_THEME, DARK_THEME
 
 
@@ -31,6 +33,10 @@ class MainWindow(QMainWindow):
         self.script_manager = ScriptManager(self.db)
         self.tabs.addTab(self.script_manager, "稿件管理")
 
+        # 文案写作
+        self.script_writer_view = ScriptWriterView(self.db)
+        self.tabs.addTab(self.script_writer_view, "文案写作")
+
         # 录音
         self.recording_panel = RecordingPanel(self.db, RECORDINGS_DIR)
         self.tabs.addTab(self.recording_panel, "录音")
@@ -46,6 +52,10 @@ class MainWindow(QMainWindow):
         # 对比
         self.comparison_view = ComparisonView(self.db)
         self.tabs.addTab(self.comparison_view, "对比")
+
+        # 台风训练
+        self.posture_view = PostureView(self.db)
+        self.tabs.addTab(self.posture_view, "台风训练")
 
         # 训练打卡
         self.progress_view = ProgressView(self.db)
@@ -98,9 +108,11 @@ class MainWindow(QMainWindow):
         if current == DARK_THEME:
             app.setStyleSheet(LIGHT_THEME)
             self.theme_action.setText("切换深色主题 (Ctrl+D)")
+            self.posture_view.set_theme("light")
         else:
             app.setStyleSheet(DARK_THEME)
             self.theme_action.setText("切换浅色主题 (Ctrl+D)")
+            self.posture_view.set_theme("dark")
 
     def _show_about(self):
         from PySide6.QtWidgets import QMessageBox
@@ -108,10 +120,11 @@ class MainWindow(QMainWindow):
             self,
             "关于 VoiceTrace",
             "<h3>VoiceTrace 声迹</h3>"
-            "<p>语音档案智能追踪系统 v1.0</p>"
+            "<p>语音档案智能追踪系统 v2.0</p>"
             "<p>面向播音主持专业学习者及语音训练需求的桌面应用。</p>"
-            "<p>功能：稿件管理 / 录音 / 分析 / 跟读模式 / 对比 / 训练打卡 / 数据导出</p>"
+            "<p>功能：稿件管理 / 文案写作 / 录音 / 分析 / 跟读模式 / 对比 / 台风训练 / 训练打卡 / 数据导出</p>"
             "<p style='color: #888;'>快捷键：Ctrl+R 开始/停止录音 · 空格 标记卡顿 · Ctrl+D 切换主题</p>"
+            "<p style='color: #888;'>台风训练需安装 MediaPipe：pip install mediapipe opencv-python</p>"
         )
 
     def _on_script_selected(self, script_id: int, title: str, content: str):
@@ -134,6 +147,8 @@ class MainWindow(QMainWindow):
             self.follow_read_view.refresh_recordings()
         elif widget is self.progress_view:
             self.progress_view.refresh()
+        elif widget is self.posture_view:
+            self.posture_view._refresh_history()
 
     def _open_export(self):
         dialog = ExportDialog(self.db, self)
