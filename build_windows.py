@@ -67,11 +67,16 @@ def build():
         "--hidden-import", "cv2",
         "--hidden-import", "requests",
         "--hidden-import", "parselmouth",
+        "--hidden-import", "faster_whisper",
+        "--hidden-import", "torch",
+        "--hidden-import", "torchaudio",
         "--collect-submodules", "librosa",
         "--collect-submodules", "sklearn",
         "--collect-submodules", "reportlab",
         "--collect-submodules", "mediapipe",
         "--collect-submodules", "parselmouth",
+        "--collect-submodules", "faster_whisper",
+        "--collect-submodules", "torch",
         MAIN_SCRIPT,
     ]
     print(">> Running:", " ".join(cmd))

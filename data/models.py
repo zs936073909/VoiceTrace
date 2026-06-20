@@ -40,6 +40,8 @@ class Analysis:
     sentence_analysis_json: Optional[str] = None  # JSON: [{sentence, rate, pause_count}, ...]
     # 韵律特征 JSON
     prosody_json: Optional[str] = None  # JSON: ProsodyFeatures.to_dict()
+    # 强制对齐结果 JSON
+    alignment_json: Optional[str] = None  # JSON: AlignmentResult.to_dict()
     id: Optional[int] = None
 
 

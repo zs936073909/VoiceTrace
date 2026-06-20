@@ -6,12 +6,14 @@ import webrtcvad
 from voicetrace.utils.audio import count_chinese_chars, count_english_words
 
 from voicetrace.core.prosody_analyzer import ProsodyAnalyzer, is_parselmouth_available
+from voicetrace.core.aligner import ForcedAligner, is_forced_aligner_available
 
 
 class Analyzer:
     def __init__(self):
         self.vad = webrtcvad.Vad(2)  # aggressiveness 0-3
         self.prosody_analyzer = ProsodyAnalyzer() if is_parselmouth_available() else None
+        self.forced_aligner = ForcedAligner() if is_forced_aligner_available() else None
 
     def calculate_speech_rate(self, text_count: int, speaking_duration: float, language: str) -> float:
         if speaking_duration <= 0:
@@ -257,6 +259,17 @@ class Analyzer:
             except Exception:
                 prosody = None
 
+        # 强制对齐（字/词级时间戳）
+        alignment = None
+        if self.forced_aligner is not None and script_text.strip():
+            try:
+                lang_code = "zh" if language == "chinese" else ("en" if language == "english" else None)
+                align_result = self.forced_aligner.align(audio_path, script_text, language=lang_code)
+                if not align_result.error:
+                    alignment = align_result.to_dict()
+            except Exception:
+                alignment = None
+
         return {
             "speech_rate": speech_rate,
             "pause_count": pause_count,
@@ -269,4 +282,5 @@ class Analyzer:
             "spectrogram": spectrogram,
             "duration": duration,
             "prosody": prosody,
+            "alignment": alignment,
         }

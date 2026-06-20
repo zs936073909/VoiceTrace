@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (
     QSlider, QGroupBox, QCheckBox
 )
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QScatterSeries
-from PySide6.QtCore import Qt, QUrl, QPointF
-from PySide6.QtGui import QPainter, QColor, QPen
+from PySide6.QtCore import Qt, QUrl, QPointF, QRectF
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QBrush
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 from voicetrace.data.database import Database
@@ -75,6 +75,128 @@ class WaveformWidget(QWidget):
                     x_ratio = s.stumble_time / (len(self._waveform) * 0.01)  # 近似
                     x = min(x_ratio * w, w - 1)
                     painter.drawLine(int(x), 0, int(x), h)
+
+
+class AlignmentWidget(QWidget):
+    """字级/词级对齐可视化组件"""
+
+    # 颜色
+    COLOR_NORMAL = QColor("#27ae60")
+    COLOR_MISSING = QColor("#e74c3c")
+    COLOR_BG = QColor("#faf9f6")
+    COLOR_BORDER = QColor("#d4cfc4")
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(200)
+        self._alignment = None
+        self._duration = 0.0
+        self._row_height = 32
+        self._token_width_min = 24
+        self._margin = 20
+
+    def set_alignment(self, alignment: dict, duration: float = 0.0):
+        self._alignment = alignment
+        self._duration = duration
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        painter.fillRect(self.rect(), self.COLOR_BG)
+
+        if not self._alignment or not self._alignment.get("sentences"):
+            painter.setPen(QColor("#999999"))
+            painter.drawText(self.rect(), Qt.AlignCenter, "分析后显示字级对齐（需 faster-whisper 模型）")
+            return
+
+        # 计算总时长
+        sentences = self._alignment["sentences"]
+        end_times = []
+        for s in sentences:
+            for t in s.get("tokens", []):
+                if t.get("end_time"):
+                    end_times.append(t["end_time"])
+        total_duration = self._duration or (max(end_times) if end_times else 1.0)
+        if total_duration <= 0:
+            total_duration = 1.0
+
+        # 可用宽度
+        usable_w = w - 2 * self._margin
+
+        y = self._margin
+        for s in sentences:
+            # 句子标签
+            painter.setPen(QColor("#333333"))
+            painter.setFont(QFont("Microsoft YaHei", 9))
+            painter.drawText(self._margin, y - 5, f"[{s.get('start_time', 0):.2f}s] {s.get('text', '')[:30]}")
+            y += 18
+
+            # 绘制每个 token
+            x = self._margin
+            row_start_y = y
+            max_h_in_row = 0
+            for t in s.get("tokens", []):
+                start = t.get("start_time", 0.0)
+                end = t.get("end_time", 0.0)
+                text = t.get("text", "")
+                is_missing = t.get("is_missing", False)
+
+                if is_missing or end <= start:
+                    # 缺失 token：固定宽度，红色
+                    box_w = max(self._token_width_min, painter.fontMetrics().horizontalAdvance(text) + 12)
+                    color = self.COLOR_MISSING
+                else:
+                    # 按时间比例计算宽度
+                    ratio = (end - start) / total_duration
+                    box_w = max(self._token_width_min, ratio * usable_w)
+                    color = self.COLOR_NORMAL
+
+                # 换行
+                if x + box_w > w - self._margin:
+                    x = self._margin
+                    y += max_h_in_row + 8
+                    row_start_y = y
+                    max_h_in_row = 0
+
+                # 绘制圆角矩形
+                rect = QRectF(x, y, box_w, self._row_height)
+                painter.setPen(QPen(self.COLOR_BORDER, 1))
+                painter.setBrush(QBrush(color))
+                painter.drawRoundedRect(rect, 4, 4)
+
+                # 绘制文字
+                painter.setPen(QColor("#ffffff"))
+                fm = painter.fontMetrics()
+                text_w = fm.horizontalAdvance(text)
+                if text_w > box_w - 4:
+                    # 文字太长则截断
+                    text = text[:max(1, len(text) - 2)] + "…"
+                    text_w = fm.horizontalAdvance(text)
+                text_x = x + (box_w - text_w) / 2
+                text_y = y + (self._row_height + fm.ascent() - fm.descent()) / 2
+                painter.drawText(int(text_x), int(text_y), text)
+
+                # 绘制时间提示（hover 效果简化：直接显示在下方）
+                if not is_missing and end > start:
+                    painter.setPen(QColor("#666666"))
+                    painter.setFont(QFont("Microsoft YaHei", 7))
+                    time_text = f"{end-start:.2f}s"
+                    painter.drawText(int(x + 2), int(y + self._row_height + 12), time_text)
+                    painter.setFont(QFont("Microsoft YaHei", 9))
+
+                x += box_w + 6
+                max_h_in_row = max(max_h_in_row, self._row_height + 14)
+
+            y += max_h_in_row + 16
+
+        # 调整最小高度
+        min_h = y + self._margin
+        if min_h > self.minimumHeight():
+            self.setMinimumHeight(min_h)
 
 
 class AnalysisView(QWidget):
@@ -195,6 +317,10 @@ class AnalysisView(QWidget):
         prosody_layout.addWidget(self.prosody_table)
         self.sub_tabs.addTab(prosody_widget, "韵律分析")
 
+        # 字级对齐
+        self.alignment_widget = AlignmentWidget()
+        self.sub_tabs.addTab(self.alignment_widget, "字级对齐")
+
         layout.addWidget(self.sub_tabs)
 
         # Connect
@@ -261,7 +387,8 @@ class AnalysisView(QWidget):
                 mfcc_features=result["mfcc_features"],
                 spectral_features=result["spectral_features"],
                 sentence_analysis_json=result["sentence_analysis_json"],
-                prosody_json=json.dumps(result.get("prosody"), ensure_ascii=False) if result.get("prosody") else None
+                prosody_json=json.dumps(result.get("prosody"), ensure_ascii=False) if result.get("prosody") else None,
+                alignment_json=json.dumps(result.get("alignment"), ensure_ascii=False) if result.get("alignment") else None
             )
             self.db.create_analysis(analysis)
 
@@ -295,6 +422,9 @@ class AnalysisView(QWidget):
 
             # 更新韵律分析
             self._update_prosody(result.get("prosody"))
+
+            # 更新字级对齐
+            self.alignment_widget.set_alignment(result.get("alignment"))
 
         except Exception as e:
             QMessageBox.critical(self, "分析失败", f"分析出错: {e}")

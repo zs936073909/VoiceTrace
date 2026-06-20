@@ -16,5 +16,10 @@ opencv-python>=4.8.0
 # 韵律分析（基于 Praat 的基频、共振峰、声音质量分析）
 praat-parselmouth>=0.4.7
 
+# 强制对齐（字/词级时间戳，基于 faster-whisper）
+# 首次运行时会自动下载 base 模型（约 74MB）
+faster-whisper>=1.0.0
+torch>=2.0.0
+
 # AI 文案写作（可选依赖：使用在线 API 智能生成时需要）
 requests>=2.31.0
