@@ -66,10 +66,12 @@ def build():
         "--hidden-import", "mediapipe",
         "--hidden-import", "cv2",
         "--hidden-import", "requests",
+        "--hidden-import", "parselmouth",
         "--collect-submodules", "librosa",
         "--collect-submodules", "sklearn",
         "--collect-submodules", "reportlab",
         "--collect-submodules", "mediapipe",
+        "--collect-submodules", "parselmouth",
         MAIN_SCRIPT,
     ]
     print(">> Running:", " ".join(cmd))
