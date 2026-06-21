@@ -1,27 +1,47 @@
 import sqlite3
+import logging
 from pathlib import Path
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import List, Optional, Union
+from contextlib import contextmanager
+
 from voicetrace.data.models import (
     Script, Recording, Stumble, Analysis, Comparison,
     TrainingSession, CustomStandard, PostureRecord, ScriptTemplate
 )
 
+logger = logging.getLogger(__name__)
+
 
 class Database:
-    def __init__(self, db_path: Path):
-        self.conn = sqlite3.connect(str(db_path))
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        self._create_tables()
-        self._migrate()
-        self._create_indexes()
+    def __init__(self, db_path: Union[str, Path]):
+        self.db_path = Path(db_path)
+        try:
+            self.conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            self._create_tables()
+            self._migrate()
+            self._create_indexes()
+        except sqlite3.Error as exc:
+            logger.error(f"数据库连接失败 {self.db_path}: {exc}")
+            raise
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    @contextmanager
+    def transaction(self):
+        """事务上下文管理器"""
+        try:
+            yield self.conn
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def _create_tables(self):
         self.conn.executescript("""
@@ -124,19 +144,21 @@ class Database:
 
     def _migrate(self):
         """Add columns if they don't exist (for existing databases)."""
-        try:
-            self.conn.execute("ALTER TABLE analyses ADD COLUMN sentence_analysis_json TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            self.conn.execute("ALTER TABLE analyses ADD COLUMN prosody_json TEXT")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            self.conn.execute("ALTER TABLE analyses ADD COLUMN alignment_json TEXT")
-        except sqlite3.OperationalError:
-            pass
-        self.conn.commit()
+        columns_to_add = [
+            ("analyses", "sentence_analysis_json", "TEXT"),
+            ("analyses", "prosody_json", "TEXT"),
+            ("analyses", "alignment_json", "TEXT"),
+        ]
+        for table, column, col_type in columns_to_add:
+            try:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                self.conn.commit()
+                logger.info(f"数据库迁移：添加列 {table}.{column}")
+            except sqlite3.OperationalError:
+                # 列已存在
+                pass
+            except Exception as exc:
+                logger.warning(f"数据库迁移失败 {table}.{column}: {exc}")
 
     def _create_indexes(self):
         self.conn.executescript("""
@@ -154,6 +176,8 @@ class Database:
     # ---- Script CRUD ----
 
     def create_script(self, script: Script) -> int:
+        if not script.title:
+            raise ValueError("稿件标题不能为空")
         cursor = self.conn.execute(
             "INSERT INTO scripts (title, category, language, content) VALUES (?, ?, ?, ?)",
             (script.title, script.category, script.language, script.content)
@@ -162,6 +186,8 @@ class Database:
         return cursor.lastrowid
 
     def get_script(self, script_id: int) -> Optional[Script]:
+        if script_id is None:
+            return None
         row = self.conn.execute("SELECT * FROM scripts WHERE id = ?", (script_id,)).fetchone()
         if row:
             return Script(
@@ -181,6 +207,8 @@ class Database:
     def update_script(self, script: Script) -> bool:
         if script.id is None:
             return False
+        if not script.title:
+            return False
         cursor = self.conn.execute(
             "UPDATE scripts SET title=?, category=?, language=?, content=? WHERE id=?",
             (script.title, script.category, script.language, script.content, script.id)
@@ -189,6 +217,8 @@ class Database:
         return cursor.rowcount > 0
 
     def delete_script(self, script_id: int) -> bool:
+        if script_id is None:
+            return False
         cursor = self.conn.execute("DELETE FROM scripts WHERE id=?", (script_id,))
         self.conn.commit()
         return cursor.rowcount > 0
@@ -196,6 +226,10 @@ class Database:
     # ---- Recording CRUD ----
 
     def create_recording(self, recording: Recording) -> int:
+        if recording.script_id is None:
+            raise ValueError("录音必须关联稿件")
+        if not recording.file_path:
+            raise ValueError("录音文件路径不能为空")
         cursor = self.conn.execute(
             "INSERT INTO recordings (script_id, file_path, duration) VALUES (?, ?, ?)",
             (recording.script_id, recording.file_path, recording.duration)
@@ -204,6 +238,8 @@ class Database:
         return cursor.lastrowid
 
     def get_recording(self, recording_id: int) -> Optional[Recording]:
+        if recording_id is None:
+            return None
         row = self.conn.execute(
             "SELECT * FROM recordings WHERE id = ?", (recording_id,)
         ).fetchone()
@@ -231,6 +267,8 @@ class Database:
         ]
 
     def delete_recording(self, recording_id: int) -> bool:
+        if recording_id is None:
+            return False
         cursor = self.conn.execute("DELETE FROM recordings WHERE id=?", (recording_id,))
         self.conn.commit()
         return cursor.rowcount > 0
@@ -238,6 +276,8 @@ class Database:
     # ---- Stumble CRUD ----
 
     def create_stumble(self, stumble: Stumble) -> int:
+        if stumble.recording_id is None:
+            raise ValueError("卡顿必须关联录音")
         cursor = self.conn.execute(
             "INSERT INTO stumbles (recording_id, stumble_time, label) VALUES (?, ?, ?)",
             (stumble.recording_id, stumble.stumble_time, stumble.label)
@@ -246,6 +286,8 @@ class Database:
         return cursor.lastrowid
 
     def get_stumbles(self, recording_id: int) -> List[Stumble]:
+        if recording_id is None:
+            return []
         rows = self.conn.execute(
             "SELECT * FROM stumbles WHERE recording_id = ? ORDER BY stumble_time",
             (recording_id,)
@@ -257,6 +299,8 @@ class Database:
         ]
 
     def delete_stumbles(self, recording_id: int) -> int:
+        if recording_id is None:
+            return 0
         cursor = self.conn.execute(
             "DELETE FROM stumbles WHERE recording_id=?", (recording_id,)
         )
@@ -266,6 +310,8 @@ class Database:
     # ---- Analysis CRUD ----
 
     def create_analysis(self, analysis: Analysis) -> int:
+        if analysis.recording_id is None:
+            raise ValueError("分析必须关联录音")
         cursor = self.conn.execute(
             """INSERT INTO analyses (recording_id, speech_rate, pause_count,
                total_pause_duration, rms_energy, mfcc_features, spectral_features,
@@ -281,6 +327,8 @@ class Database:
         return cursor.lastrowid
 
     def get_latest_analysis(self, recording_id: int) -> Optional[Analysis]:
+        if recording_id is None:
+            return None
         row = self.conn.execute(
             "SELECT * FROM analyses WHERE recording_id = ? ORDER BY created_at DESC LIMIT 1",
             (recording_id,)
@@ -300,6 +348,8 @@ class Database:
         return None
 
     def list_analyses(self, recording_id: int) -> List[Analysis]:
+        if recording_id is None:
+            return []
         rows = self.conn.execute(
             "SELECT * FROM analyses WHERE recording_id = ? ORDER BY created_at DESC",
             (recording_id,)
@@ -322,6 +372,8 @@ class Database:
     # ---- Comparison CRUD ----
 
     def create_comparison(self, comparison: Comparison) -> int:
+        if comparison.recording_id is None or comparison.baseline_id is None:
+            raise ValueError("对比必须关联两条录音")
         cursor = self.conn.execute(
             """INSERT INTO comparisons (recording_id, baseline_id, similarity_score, differences_json)
                VALUES (?, ?, ?, ?)""",
@@ -332,6 +384,8 @@ class Database:
         return cursor.lastrowid
 
     def get_latest_comparison(self, recording_id: int) -> Optional[Comparison]:
+        if recording_id is None:
+            return None
         row = self.conn.execute(
             "SELECT * FROM comparisons WHERE recording_id = ? ORDER BY created_at DESC LIMIT 1",
             (recording_id,)
@@ -358,6 +412,7 @@ class Database:
         return cursor.lastrowid
 
     def list_training_sessions(self, limit: int = 100) -> List[TrainingSession]:
+        limit = max(1, min(limit, 10000))
         rows = self.conn.execute(
             "SELECT * FROM training_sessions ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
@@ -389,8 +444,6 @@ class Database:
         for d in dates:
             if d == check_date:
                 streak += 1
-                # 前一天
-                from datetime import timedelta
                 check_date = (datetime.strptime(check_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
             elif d < check_date:
                 break
@@ -404,6 +457,10 @@ class Database:
     # ---- CustomStandard CRUD ----
 
     def create_custom_standard(self, std: CustomStandard) -> int:
+        if not std.name:
+            raise ValueError("标准名称不能为空")
+        if std.rate_min is None or std.rate_max is None or std.rate_min > std.rate_max:
+            raise ValueError("语速范围无效")
         cursor = self.conn.execute(
             "INSERT INTO custom_standards (name, language, category, rate_min, rate_max, unit) VALUES (?, ?, ?, ?, ?, ?)",
             (std.name, std.language, std.category, std.rate_min, std.rate_max, std.unit)
@@ -423,6 +480,8 @@ class Database:
         ]
 
     def delete_custom_standard(self, std_id: int) -> bool:
+        if std_id is None:
+            return False
         cursor = self.conn.execute("DELETE FROM custom_standards WHERE id=?", (std_id,))
         self.conn.commit()
         return cursor.rowcount > 0
@@ -448,6 +507,8 @@ class Database:
         return cursor.lastrowid
 
     def get_posture_record(self, record_id: int) -> Optional[PostureRecord]:
+        if record_id is None:
+            return None
         row = self.conn.execute(
             "SELECT * FROM posture_records WHERE id = ?", (record_id,)
         ).fetchone()
@@ -456,6 +517,7 @@ class Database:
         return None
 
     def list_posture_records(self, limit: int = 100) -> List[PostureRecord]:
+        limit = max(1, min(limit, 10000))
         rows = self.conn.execute(
             "SELECT * FROM posture_records ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
@@ -479,6 +541,8 @@ class Database:
     # ---- ScriptTemplate CRUD ----
 
     def create_script_template(self, tpl: ScriptTemplate) -> int:
+        if not tpl.name:
+            raise ValueError("模板名称不能为空")
         cursor = self.conn.execute(
             "INSERT INTO script_templates (name, category, language, structure_json, tips) VALUES (?, ?, ?, ?, ?)",
             (tpl.name, tpl.category, tpl.language, tpl.structure_json, tpl.tips)
@@ -504,4 +568,11 @@ class Database:
         ]
 
     def close(self):
-        self.conn.close()
+        try:
+            self.conn.commit()
+        except Exception as exc:
+            logger.warning(f"关闭数据库前提交失败: {exc}")
+        try:
+            self.conn.close()
+        except Exception as exc:
+            logger.warning(f"关闭数据库失败: {exc}")

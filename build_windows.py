@@ -48,6 +48,7 @@ def build():
         "--clean",
         "--paths", "..",
         "--add-data", "config;config",
+        "--add-data", "models;models",
         "--hidden-import", "PySide6.QtCharts",
         "--hidden-import", "PySide6.QtMultimedia",
         "--hidden-import", "PySide6.QtMultimediaWidgets",
