@@ -73,6 +73,20 @@ class RecordingPanel(QWidget):
         self.stumble_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.stumble_label)
 
+        # 实时音量电平
+        level_layout = QHBoxLayout()
+        level_layout.addWidget(QLabel("输入电平:"))
+        self.level_bar = QProgressBar()
+        self.level_bar.setRange(0, 100)
+        self.level_bar.setValue(0)
+        self.level_bar.setTextVisible(False)
+        self.level_bar.setStyleSheet("QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } QProgressBar::chunk { background: #27ae60; border-radius: 4px; }")
+        level_layout.addWidget(self.level_bar, 1)
+        self.level_label = QLabel("-inf dB")
+        self.level_label.setMinimumWidth(60)
+        level_layout.addWidget(self.level_label)
+        layout.addLayout(level_layout)
+
         # 进度条
         self.progress = QProgressBar()
         self.progress.setMaximum(300)  # 5 分钟
@@ -200,6 +214,47 @@ class RecordingPanel(QWidget):
         if self._audio_io and self.is_recording:
             data = self._audio_io.readAll()
             self._audio_buffer.append(data)
+            self._update_input_level(data.data())
+
+    def _update_input_level(self, data: bytes):
+        """计算并显示输入音量电平"""
+        if not data:
+            return
+        try:
+            import numpy as np
+            # int16 格式
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+            if samples.size == 0:
+                return
+            rms = np.sqrt(np.mean(samples ** 2))
+            if rms > 0:
+                db = 20 * np.log10(rms / 32768.0)
+                # 映射到 0-100: -60dB -> 0, -3dB -> 100
+                level = int((db + 60) / 57 * 100)
+                level = max(0, min(100, level))
+            else:
+                db = -100
+                level = 0
+            self.level_bar.setValue(level)
+            self.level_label.setText(f"{db:.0f} dB")
+            # 根据电平变色
+            if level > 90:
+                self.level_bar.setStyleSheet(
+                    "QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } "
+                    "QProgressBar::chunk { background: #c0392b; border-radius: 4px; }"
+                )
+            elif level > 60:
+                self.level_bar.setStyleSheet(
+                    "QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } "
+                    "QProgressBar::chunk { background: #f39c12; border-radius: 4px; }"
+                )
+            else:
+                self.level_bar.setStyleSheet(
+                    "QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } "
+                    "QProgressBar::chunk { background: #27ae60; border-radius: 4px; }"
+                )
+        except Exception:
+            pass
 
     def stop_recording(self):
         if not self.is_recording:
@@ -210,6 +265,8 @@ class RecordingPanel(QWidget):
         self.stumble_btn.setEnabled(False)
         self.record_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self.level_bar.setValue(0)
+        self.level_label.setText("-inf dB")
         self.status_label.setText("保存中...")
 
         if self._audio_source:

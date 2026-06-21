@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
-    QMessageBox, QGroupBox, QSlider, QTextEdit
+    QMessageBox, QGroupBox, QSlider, QTextEdit, QProgressBar
 )
 from PySide6.QtCore import Qt, QUrl, QTimer, QIODevice, QByteArray, Signal
 from PySide6.QtMultimedia import (
@@ -50,6 +50,7 @@ class FollowReadView(QWidget):
         self._audio_format = None
         self.recording_start_time = 0.0
         self._last_follow_path = None
+        self._last_follow_id = None
 
         self._setup_ui()
         self._setup_timer()
@@ -109,6 +110,20 @@ class FollowReadView(QWidget):
         self.follow_duration.setAlignment(Qt.AlignCenter)
         follow_layout.addWidget(self.follow_duration)
 
+        # 实时音量电平
+        level_layout = QHBoxLayout()
+        level_layout.addWidget(QLabel("输入电平:"))
+        self.level_bar = QProgressBar()
+        self.level_bar.setRange(0, 100)
+        self.level_bar.setValue(0)
+        self.level_bar.setTextVisible(False)
+        self.level_bar.setStyleSheet("QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } QProgressBar::chunk { background: #27ae60; border-radius: 4px; }")
+        level_layout.addWidget(self.level_bar, 1)
+        self.level_label = QLabel("-inf dB")
+        self.level_label.setMinimumWidth(60)
+        level_layout.addWidget(self.level_label)
+        follow_layout.addLayout(level_layout)
+
         follow_controls = QHBoxLayout()
         self.start_follow_btn = QPushButton("开始跟读录制")
         self.stop_follow_btn = QPushButton("停止录制")
@@ -135,11 +150,15 @@ class FollowReadView(QWidget):
         self.result_text.setMaximumHeight(150)
         result_layout.addWidget(self.result_text)
 
-        # 跟读回放
+        # 跟读回放与删除
         replay_layout = QHBoxLayout()
         self.replay_btn = QPushButton("回放跟读")
         self.replay_btn.setEnabled(False)
+        self.delete_follow_btn = QPushButton("删除跟读")
+        self.delete_follow_btn.setToolTip("删除最近一次跟读录音及其文件")
+        self.delete_follow_btn.setEnabled(False)
         replay_layout.addWidget(self.replay_btn)
+        replay_layout.addWidget(self.delete_follow_btn)
         replay_layout.addStretch()
         result_layout.addLayout(replay_layout)
 
@@ -154,6 +173,7 @@ class FollowReadView(QWidget):
         self.start_follow_btn.clicked.connect(self._start_follow_recording)
         self.stop_follow_btn.clicked.connect(self._stop_follow_recording)
         self.replay_btn.clicked.connect(self._replay_follow)
+        self.delete_follow_btn.clicked.connect(self._delete_follow_recording)
 
     def _setup_timer(self):
         self.timer = QTimer()
@@ -242,6 +262,35 @@ class FollowReadView(QWidget):
         if self._audio_io and self.is_recording:
             data = self._audio_io.readAll()
             self._audio_buffer.append(data)
+            self._update_input_level(data.data())
+
+    def _update_input_level(self, data: bytes):
+        """计算并显示输入音量电平"""
+        if not data:
+            return
+        try:
+            import numpy as np
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+            if samples.size == 0:
+                return
+            rms = np.sqrt(np.mean(samples ** 2))
+            if rms > 0:
+                db = 20 * np.log10(rms / 32768.0)
+                level = int((db + 60) / 57 * 100)
+                level = max(0, min(100, level))
+            else:
+                db = -100
+                level = 0
+            self.level_bar.setValue(level)
+            self.level_label.setText(f"{db:.0f} dB")
+            if level > 90:
+                self.level_bar.setStyleSheet("QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } QProgressBar::chunk { background: #c0392b; border-radius: 4px; }")
+            elif level > 60:
+                self.level_bar.setStyleSheet("QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } QProgressBar::chunk { background: #f39c12; border-radius: 4px; }")
+            else:
+                self.level_bar.setStyleSheet("QProgressBar { border: 1px solid #d4cfc4; border-radius: 4px; background: #f0ebe2; } QProgressBar::chunk { background: #27ae60; border-radius: 4px; }")
+        except Exception:
+            pass
 
     def _stop_follow_recording(self):
         if not self.is_recording:
@@ -251,6 +300,8 @@ class FollowReadView(QWidget):
         self.timer.stop()
         self.start_follow_btn.setEnabled(True)
         self.stop_follow_btn.setEnabled(False)
+        self.level_bar.setValue(0)
+        self.level_label.setText("-inf dB")
         self.follow_status.setText("分析中...")
 
         if self._audio_source:
@@ -360,6 +411,8 @@ class FollowReadView(QWidget):
                 duration=self.recording_start_time
             )
             follow_rec_id = self.db.create_recording(follow_recording)
+            self._last_follow_id = follow_rec_id
+            self.delete_follow_btn.setEnabled(True)
             self.recording_saved.emit(follow_rec_id)
 
         except Exception as e:
@@ -393,3 +446,38 @@ class FollowReadView(QWidget):
         if self._last_follow_path:
             self.follow_player.setSource(QUrl.fromLocalFile(self._last_follow_path))
             self.follow_player.play()
+
+    def _delete_follow_recording(self):
+        """删除最近一次跟读录音"""
+        if not self._last_follow_id:
+            QMessageBox.information(self, "无录音", "当前没有可删除的跟读录音")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除最近一次跟读录音吗？\n此操作不可恢复。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            self.db.delete_recording(self._last_follow_id)
+        except Exception as e:
+            QMessageBox.warning(self, "删除失败", f"数据库记录删除失败: {e}")
+            return
+
+        try:
+            if self._last_follow_path and Path(self._last_follow_path).exists():
+                Path(self._last_follow_path).unlink()
+        except Exception as e:
+            QMessageBox.warning(self, "文件删除失败", f"数据库记录已删除，但文件删除失败: {e}")
+
+        self._last_follow_id = None
+        self._last_follow_path = None
+        self.replay_btn.setEnabled(False)
+        self.delete_follow_btn.setEnabled(False)
+        self.follow_status.setText("跟读录音已删除")
+        QMessageBox.information(self, "删除成功", "跟读录音已删除")

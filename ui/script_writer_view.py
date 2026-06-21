@@ -150,6 +150,14 @@ class ScriptWriterView(QWidget):
         select_form.addRow("模板：", self.template_combo)
 
         select_card.main_layout.addLayout(select_form)
+
+        # 模板描述/空状态提示
+        self.template_desc_label = QLabel()
+        self.template_desc_label.setObjectName("writerSubtitle")
+        self.template_desc_label.setWordWrap(True)
+        self.template_desc_label.setVisible(False)
+        select_card.main_layout.addWidget(self.template_desc_label)
+
         root_layout.addWidget(select_card)
 
         # 占位符填写卡片
@@ -293,17 +301,46 @@ class ScriptWriterView(QWidget):
             2: "mock_host",
             3: "speech"
         }
-        language_map = {0: "chinese", 1: "english"}
+        language_map = {0: "中文", 1: "英文"}
+        language_code_map = {0: "chinese", 1: "english"}
 
         category = category_map.get(self.category_combo.currentIndex(), "news_broadcast")
-        language = language_map.get(self.language_combo.currentIndex(), "chinese")
+        language = language_map.get(self.language_combo.currentIndex(), "中文")
+        language_code = language_code_map.get(self.language_combo.currentIndex(), "chinese")
 
-        templates = self.writer.get_templates_by_category(category, language)
+        templates = self.writer.get_templates_by_category(category, language_code)
         self.template_combo.clear()
+
+        # 清空占位符区
+        self._clear_placeholders()
+        self.tips_label.setVisible(False)
+
+        if not templates:
+            self.template_desc_label.setText(
+                f"⚠️ 当前分类「{self.category_combo.currentText()}」下暂无{language}模板。\n"
+                f"请尝试切换语言或分类。"
+            )
+            self.template_desc_label.setVisible(True)
+            self._current_template = None
+            return
+
+        self.template_desc_label.setVisible(False)
         for t in templates:
             self.template_combo.addItem(t["name"])
-        if templates:
-            self._on_template_selected(0)
+        self._on_template_selected(0)
+
+    def _clear_placeholders(self):
+        """清空占位符输入区"""
+        while self.placeholders_layout.count():
+            item = self.placeholders_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+        self._placeholder_inputs = {}
 
     def _on_template_selected(self, index: int):
         """模板选择变化"""
@@ -320,24 +357,25 @@ class ScriptWriterView(QWidget):
         self._current_template = template
 
         # 清空占位符区
-        while self.placeholders_layout.count():
-            item = self.placeholders_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                # 清理子布局中的控件
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
+        self._clear_placeholders()
+
+        # 显示模板描述
+        desc = template.get("tips", "")
+        if desc:
+            self.template_desc_label.setText(f"📄 {template['name']}：{desc[:120]}{'...' if len(desc) > 120 else ''}")
+            self.template_desc_label.setVisible(True)
 
         # 创建占位符输入框
-        self._placeholder_inputs = {}
         placeholders = template.get("placeholders", {})
-        for key, desc in placeholders.items():
-            edit = self._create_line_edit(desc)
-            self.placeholders_layout.addRow(f"{key}：", edit)
-            self._placeholder_inputs[key] = edit
+        if not placeholders:
+            no_ph_label = QLabel("该模板无需填写占位符，直接点击生成即可。")
+            no_ph_label.setObjectName("writerSubtitle")
+            self.placeholders_layout.addRow(no_ph_label)
+        else:
+            for key, desc in placeholders.items():
+                edit = self._create_line_edit(desc)
+                self.placeholders_layout.addRow(f"{key}：", edit)
+                self._placeholder_inputs[key] = edit
 
         # 显示写作提示
         tips = template.get("tips", "")

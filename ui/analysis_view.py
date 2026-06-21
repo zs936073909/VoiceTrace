@@ -4,7 +4,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QMessageBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSlider, QGroupBox, QCheckBox, QTextEdit
+    QSlider, QGroupBox, QCheckBox, QTextEdit, QLineEdit
 )
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QScatterSeries
 from PySide6.QtCore import Qt, QUrl, QPointF, QRectF
@@ -14,6 +14,8 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from voicetrace.data.database import Database
 from voicetrace.core.analyzer import Analyzer
 from voicetrace.core.standards import get_standard, check_rate
+from voicetrace.core.feedback_generator import FeedbackGenerator
+from voicetrace.core.llm_service import LLMConfig, get_default_api_url, get_default_model
 from voicetrace.data.models import Analysis
 
 
@@ -204,6 +206,9 @@ class AnalysisView(QWidget):
         super().__init__()
         self.db = db
         self.analyzer = Analyzer()
+        self.feedback_generator = FeedbackGenerator()
+        self._last_analysis_result: Optional[dict] = None
+        self._last_script = None
         self._current_recording_path = None
         self._current_recording_id = None
 
@@ -259,14 +264,62 @@ class AnalysisView(QWidget):
         self.standard_label.setStyleSheet("font-size: 14px;")
         layout.addWidget(self.standard_label)
 
+        # LLM 智能教练配置
+        llm_group = QGroupBox("AI 教练（LLM 智能建议）")
+        llm_layout = QHBoxLayout(llm_group)
+        llm_layout.setSpacing(10)
+
+        llm_layout.addWidget(QLabel("服务商:"))
+        self.llm_provider_combo = QComboBox()
+        self.llm_provider_combo.addItems(["NVIDIA", "OpenAI", "DeepSeek", "Moonshot", "Anthropic", "自定义"])
+        self.llm_provider_combo.setItemData(0, "nvidia")
+        self.llm_provider_combo.setItemData(1, "openai")
+        self.llm_provider_combo.setItemData(2, "deepseek")
+        self.llm_provider_combo.setItemData(3, "moonshot")
+        self.llm_provider_combo.setItemData(4, "anthropic")
+        self.llm_provider_combo.setItemData(5, "custom")
+        self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed)
+        llm_layout.addWidget(self.llm_provider_combo)
+
+        llm_layout.addWidget(QLabel("API Key:"))
+        self.llm_key_edit = QLineEdit()
+        self.llm_key_edit.setEchoMode(QLineEdit.Password)
+        self.llm_key_edit.setPlaceholderText("输入 API 密钥")
+        self.llm_key_edit.setMinimumWidth(160)
+        llm_layout.addWidget(self.llm_key_edit)
+
+        llm_layout.addWidget(QLabel("模型:"))
+        self.llm_model_edit = QLineEdit()
+        self.llm_model_edit.setPlaceholderText("meta/llama3-70b-instruct")
+        self.llm_model_edit.setMinimumWidth(160)
+        llm_layout.addWidget(self.llm_model_edit)
+
+        self.llm_url_edit = QLineEdit()
+        self.llm_url_edit.setPlaceholderText("API 地址")
+        self.llm_url_edit.setMinimumWidth(220)
+        self.llm_url_edit.setVisible(False)
+        llm_layout.addWidget(self.llm_url_edit)
+
+        self.llm_suggest_btn = QPushButton("获取 AI 建议")
+        self.llm_suggest_btn.setToolTip("基于上方分析结果调用 LLM 生成个性化训练建议")
+        self.llm_suggest_btn.setEnabled(False)
+        self.llm_suggest_btn.clicked.connect(self._generate_llm_feedback)
+        llm_layout.addWidget(self.llm_suggest_btn)
+
+        llm_layout.addStretch()
+        layout.addWidget(llm_group)
+
+        # 初始化 NVIDIA 默认配置
+        self._on_llm_provider_changed(0)
+
         # 智能分析结论
         insights_group = QGroupBox("分析意见与改进建议")
         insights_layout = QVBoxLayout(insights_group)
         self.insights_text = QTextEdit()
         self.insights_text.setReadOnly(True)
-        self.insights_text.setPlaceholderText("分析后将在此给出针对性改进建议...")
+        self.insights_text.setPlaceholderText("分析后将在此给出针对性改进建议；点击'获取 AI 建议'可调用 LLM 生成更个性化的反馈。")
         self.insights_text.setMinimumHeight(120)
-        self.insights_text.setMaximumHeight(200)
+        self.insights_text.setMaximumHeight(240)
         insights_layout.addWidget(self.insights_text)
         layout.addWidget(insights_group)
 
@@ -440,6 +493,11 @@ class AnalysisView(QWidget):
 
             # 更新字级对齐
             self.alignment_widget.set_alignment(result.get("alignment"))
+
+            # 保存本次分析结果，供 LLM 反馈使用
+            self._last_analysis_result = result
+            self._last_script = script
+            self.llm_suggest_btn.setEnabled(True)
 
         except Exception as e:
             QMessageBox.critical(self, "分析失败", f"分析出错: {e}")
@@ -736,6 +794,94 @@ class AnalysisView(QWidget):
 
         lines.append("</body></html>")
         return "".join(lines)
+
+    def _on_llm_provider_changed(self, index: int):
+        """LLM 服务商切换时更新默认地址和模型"""
+        provider = self.llm_provider_combo.itemData(index) or "nvidia"
+        is_custom = provider == "custom"
+
+        self.llm_url_edit.setVisible(is_custom)
+        if is_custom:
+            self.llm_url_edit.setText("")
+            self.llm_model_edit.setPlaceholderText("模型名称")
+        else:
+            self.llm_url_edit.setText(get_default_api_url(provider))
+            default_model = get_default_model(provider)
+            self.llm_model_edit.setPlaceholderText(default_model)
+            # 如果当前模型为空或占位符，填入默认模型
+            if not self.llm_model_edit.text():
+                self.llm_model_edit.setText(default_model)
+
+    def _generate_llm_feedback(self):
+        """调用 LLM 生成智能反馈"""
+        if not self._last_analysis_result or not self._last_script:
+            QMessageBox.warning(self, "提示", "请先完成一次分析")
+            return
+
+        api_key = self.llm_key_edit.text().strip()
+        if not api_key:
+            QMessageBox.warning(self, "配置缺失", "请输入 API Key")
+            return
+
+        provider = self.llm_provider_combo.itemData(self.llm_provider_combo.currentIndex()) or "nvidia"
+        model = self.llm_model_edit.text().strip() or get_default_model(provider)
+        api_url = self.llm_url_edit.text().strip() or get_default_api_url(provider)
+
+        config = LLMConfig(
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            api_url=api_url,
+            temperature=0.6,
+            max_tokens=2000
+        )
+        self.feedback_generator.set_llm_config(config)
+
+        self.llm_suggest_btn.setEnabled(False)
+        self.llm_suggest_btn.setText("AI 思考中...")
+
+        try:
+            feedback = self.feedback_generator.generate(
+                result=self._last_analysis_result,
+                script_content=self._last_script.content or "",
+                script_language=self._last_script.language,
+                script_category=self._last_script.category,
+                use_llm=True
+            )
+
+            html = [
+                "<html><body style='font-size: 13px; line-height: 1.6;'>"
+                "<h3>AI 教练反馈</h3>"
+            ]
+            summary = feedback.get("summary", "")
+            if summary:
+                html.append(f"<p><b>整体评价：</b>{summary}</p>")
+
+            suggestions = feedback.get("suggestions", "")
+            if suggestions:
+                html.append("<h4>改进建议</h4>")
+                # 把换行转成 <br> 或列表
+                for line in suggestions.split("\n"):
+                    line = line.strip()
+                    if line:
+                        html.append(f"<p>{line}</p>")
+
+            drills = feedback.get("drills", "")
+            if drills:
+                html.append("<h4>针对性练习</h4>")
+                for line in drills.split("\n"):
+                    line = line.strip()
+                    if line:
+                        html.append(f"<p>{line}</p>")
+
+            html.append("</body></html>")
+            self.insights_text.setHtml("".join(html))
+
+        except Exception as e:
+            QMessageBox.warning(self, "AI 建议失败", f"生成失败: {e}")
+        finally:
+            self.llm_suggest_btn.setEnabled(True)
+            self.llm_suggest_btn.setText("获取 AI 建议")
 
     # ---- 回放 ----
 
