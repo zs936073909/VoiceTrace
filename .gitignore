@@ -48,6 +48,9 @@ desktop.ini
 
 # 临时文件
 *.tmp
+
+# 但模型文件需要提交
+!models/*.task
 *.bak
 *.log
 
