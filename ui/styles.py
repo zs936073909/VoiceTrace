@@ -166,6 +166,102 @@ QTextEdit[readOnly="true"] {
     background-color: #faf9f6;
     border: 1px solid #e0dbd0;
 }
+
+/* ===== 文案写作界面 Editorial 风格 ===== */
+#scriptWriterView {
+    background-color: #f8f6f1;
+}
+
+#writerTitle {
+    font-size: 26px;
+    font-weight: 700;
+    color: #1a1a1a;
+    letter-spacing: 1px;
+}
+
+#writerSubtitle {
+    font-size: 13px;
+    color: #6b6b6b;
+    margin-bottom: 8px;
+}
+
+#writerCard {
+    background-color: #ffffff;
+    border: 1px solid #d4cfc4;
+    border-radius: 8px;
+}
+
+#writerCardTitle {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 6px;
+}
+
+#writerPrimaryBtn {
+    background-color: #c0392b;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 10px 24px;
+}
+
+#writerPrimaryBtn:hover {
+    background-color: #a93226;
+}
+
+#writerAIBtn {
+    background-color: #8e44ad;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 10px 24px;
+}
+
+#writerAIBtn:hover {
+    background-color: #7d3c98;
+}
+
+#writerActionBtn {
+    background-color: #f0ebe2;
+    color: #2b2b2b;
+    border: 1px solid #d4cfc4;
+    border-radius: 6px;
+    padding: 8px 18px;
+}
+
+#writerActionBtn:hover {
+    background-color: #e5dfd3;
+}
+
+#writerTips {
+    background-color: #fff8e6;
+    color: #7d5a00;
+    border: 1px solid #ffeaa7;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+
+#writerWarning {
+    background-color: #fff0f0;
+    color: #c0392b;
+    border: 1px solid #f5b7b1;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+
+#writerResult {
+    background-color: #ffffff;
+    border: 1px solid #d4cfc4;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+}
 """
 
 DARK_THEME = """
@@ -331,6 +427,103 @@ QMessageBox {
 QTextEdit[readOnly="true"] {
     background-color: #16213e;
     border: 1px solid #2a2a4a;
+    color: #e0e0e0;
+}
+
+/* ===== 文案写作界面 Editorial 风格（深色） ===== */
+#scriptWriterView {
+    background-color: #1a1a2e;
+}
+
+#writerTitle {
+    font-size: 26px;
+    font-weight: 700;
+    color: #f0f0f0;
+    letter-spacing: 1px;
+}
+
+#writerSubtitle {
+    font-size: 13px;
+    color: #a0a0b0;
+    margin-bottom: 8px;
+}
+
+#writerCard {
+    background-color: #0f1628;
+    border: 1px solid #2a2a4a;
+    border-radius: 8px;
+}
+
+#writerCardTitle {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f0f0f0;
+    margin-bottom: 6px;
+}
+
+#writerPrimaryBtn {
+    background-color: #e94560;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 10px 24px;
+}
+
+#writerPrimaryBtn:hover {
+    background-color: #ff5e7a;
+}
+
+#writerAIBtn {
+    background-color: #9b59b6;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 10px 24px;
+}
+
+#writerAIBtn:hover {
+    background-color: #af7ac5;
+}
+
+#writerActionBtn {
+    background-color: #1a2540;
+    color: #e0e0e0;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    padding: 8px 18px;
+}
+
+#writerActionBtn:hover {
+    background-color: #243557;
+}
+
+#writerTips {
+    background-color: #1a2540;
+    color: #f0d78c;
+    border: 1px solid #3a3a5a;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+
+#writerWarning {
+    background-color: #2a1a1a;
+    color: #ff6b6b;
+    border: 1px solid #5a2a2a;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+}
+
+#writerResult {
+    background-color: #0f1628;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 14px;
+    line-height: 1.6;
     color: #e0e0e0;
 }
 """

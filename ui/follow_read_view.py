@@ -86,10 +86,11 @@ class FollowReadView(QWidget):
         demo_play_layout.addWidget(self.demo_time_label)
         demo_layout.addLayout(demo_play_layout)
 
-        # 示范稿件预览
-        self.demo_script_label = QLabel("稿件: --")
-        self.demo_script_label.setWordWrap(True)
-        self.demo_script_label.setStyleSheet("padding: 8px; background: rgba(0,0,0,0.03); border-radius: 4px;")
+        # 示范稿件预览（可滚动查看全文）
+        self.demo_script_label = QTextEdit("稿件: --")
+        self.demo_script_label.setReadOnly(True)
+        self.demo_script_label.setMinimumHeight(100)
+        self.demo_script_label.setMaximumHeight(180)
         demo_layout.addWidget(self.demo_script_label)
 
         demo_group.setLayout(demo_layout)
@@ -175,8 +176,9 @@ class FollowReadView(QWidget):
         if recording:
             script = self.db.get_script(recording.script_id)
             if script:
-                preview = script.content[:300] + "..." if script.content and len(script.content) > 300 else (script.content or "")
-                self.demo_script_label.setText(f"稿件: {script.title}\n\n{preview}")
+                self.demo_script_label.setPlainText(
+                    f"稿件: {script.title}\n\n{script.content or ''}"
+                )
 
     def _play_demo(self):
         rec_id = self.demo_combo.currentData()

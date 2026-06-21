@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QProgressBar,
-    QMessageBox, QSlider, QGroupBox, QCheckBox
+    QMessageBox, QSlider, QGroupBox, QCheckBox, QTextEdit
 )
 from PySide6.QtCore import Signal, QTimer, QIODevice, QByteArray, QUrl, Qt
 from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaPlayer, QAudioOutput
@@ -53,10 +53,12 @@ class RecordingPanel(QWidget):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        # 稿件预览
-        self.script_preview = QLabel("")
-        self.script_preview.setWordWrap(True)
-        self.script_preview.setStyleSheet("padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px; font-size: 13px;")
+        # 稿件预览（可滚动查看全文）
+        self.script_preview = QTextEdit()
+        self.script_preview.setReadOnly(True)
+        self.script_preview.setPlaceholderText("请先在稿件管理标签页选择一个稿件")
+        self.script_preview.setMinimumHeight(120)
+        self.script_preview.setMaximumHeight(220)
         layout.addWidget(self.script_preview)
 
         # 时长显示
@@ -102,10 +104,14 @@ class RecordingPanel(QWidget):
         playback_controls = QHBoxLayout()
         self.play_btn = QPushButton("播放")
         self.stop_play_btn = QPushButton("停止")
+        self.delete_btn = QPushButton("删除录音")
+        self.delete_btn.setToolTip("删除最近一次录音及其文件")
         self.play_btn.setEnabled(False)
         self.stop_play_btn.setEnabled(False)
+        self.delete_btn.setEnabled(False)
         playback_controls.addWidget(self.play_btn)
         playback_controls.addWidget(self.stop_play_btn)
+        playback_controls.addWidget(self.delete_btn)
         playback_controls.addStretch()
         playback_layout.addLayout(playback_controls)
 
@@ -131,6 +137,7 @@ class RecordingPanel(QWidget):
         self.stumble_btn.clicked.connect(self.mark_stumble)
         self.play_btn.clicked.connect(self._play_recording)
         self.stop_play_btn.clicked.connect(self._stop_playback)
+        self.delete_btn.clicked.connect(self._delete_recording)
         self.playback_slider.sliderMoved.connect(self._seek_playback)
 
     def _setup_timer(self):
@@ -150,8 +157,7 @@ class RecordingPanel(QWidget):
         self.current_script_title = title
         self.current_script_content = content
         self.status_label.setText(f"就绪 — 当前稿件: {title}")
-        preview = content[:200] + "..." if len(content) > 200 else content
-        self.script_preview.setText(preview if preview else "（稿件内容为空）")
+        self.script_preview.setPlainText(content if content else "（稿件内容为空）")
 
     def _make_audio_format(self) -> QAudioFormat:
         fmt = QAudioFormat()
@@ -240,6 +246,7 @@ class RecordingPanel(QWidget):
                 self._last_recording_id = recording_id
                 self.play_btn.setEnabled(True)
                 self.stop_play_btn.setEnabled(True)
+                self.delete_btn.setEnabled(True)
                 self.playback_slider.setEnabled(True)
 
                 self.recording_saved.emit(recording_id)
@@ -329,6 +336,58 @@ class RecordingPanel(QWidget):
 
     def _jump_to(self, time_sec: float):
         self.player.setPosition(int(time_sec * 1000))
+
+    def _delete_recording(self):
+        """删除最近一次录音及其文件"""
+        if not self._last_recording_id:
+            QMessageBox.information(self, "无录音", "当前没有可删除的录音")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除最近一次录音吗？\n{Path(self._last_recording_path).name}\n\n此操作不可恢复。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # 停止播放
+        self._stop_playback()
+
+        # 删除数据库记录
+        try:
+            self.db.delete_recording(self._last_recording_id)
+        except Exception as e:
+            QMessageBox.warning(self, "删除失败", f"数据库记录删除失败: {e}")
+            return
+
+        # 删除文件
+        try:
+            if self._last_recording_path and Path(self._last_recording_path).exists():
+                Path(self._last_recording_path).unlink()
+        except Exception as e:
+            QMessageBox.warning(self, "文件删除失败", f"数据库记录已删除，但文件删除失败: {e}")
+
+        # 重置状态
+        self._last_recording_id = None
+        self._last_recording_path = None
+        self.play_btn.setEnabled(False)
+        self.stop_play_btn.setEnabled(False)
+        self.delete_btn.setEnabled(False)
+        self.playback_slider.setEnabled(False)
+        self.playback_slider.setValue(0)
+        self.playback_time_label.setText("00:00 / 00:00")
+
+        # 清除卡顿跳转按钮
+        while self.stumble_jump_layout.count() > 1:
+            item = self.stumble_jump_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self.status_label.setText("录音已删除")
+        QMessageBox.information(self, "删除成功", "录音已删除")
 
     def get_denoise_enabled(self) -> bool:
         return self.denoise_check.isChecked()

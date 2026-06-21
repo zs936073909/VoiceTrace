@@ -3,6 +3,9 @@
 支持两种生成方式：
 1. 本地模板填充：选择模板 → 填写占位符 → 生成文案
 2. 在线 AI 生成：配置 API → 输入主题 → AI 生成
+
+UI 风格：Editorial / Magazine —— 清晰层级、充足留白、卡片分组，
+输入控件始终可见且易于操作。
 """
 import json
 from pathlib import Path
@@ -11,14 +14,31 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QComboBox, QGroupBox, QFormLayout, QLineEdit, QTextEdit,
+    QComboBox, QFormLayout, QLineEdit, QTextEdit,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QScrollArea, QSpinBox, QDoubleSpinBox, QCheckBox,
-    QFileDialog, QSplitter, QFrame
+    QFileDialog, QSplitter, QFrame, QSizePolicy
 )
 
 from voicetrace.core.script_writer import ScriptWriter, is_ai_available
 from voicetrace.data.models import Script
+
+
+class _Card(QFrame):
+    """卡片容器：带标题和垂直布局"""
+
+    def __init__(self, title: str = "", parent=None):
+        super().__init__(parent)
+        self.setObjectName("writerCard")
+        self.setProperty("class", "writer-card")
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setSpacing(14)
+        self.main_layout.setContentsMargins(18, 16, 18, 18)
+
+        if title:
+            self.title_label = QLabel(title)
+            self.title_label.setObjectName("writerCardTitle")
+            self.main_layout.addWidget(self.title_label)
 
 
 class ScriptWriterView(QWidget):
@@ -33,88 +53,147 @@ class ScriptWriterView(QWidget):
         self._load_templates()
 
     def _init_ui(self):
+        self.setObjectName("scriptWriterView")
         layout = QVBoxLayout(self)
+        layout.setSpacing(18)
+        layout.setContentsMargins(20, 16, 20, 20)
 
-        # 标题
+        # 标题区
+        header = QWidget()
+        header.setObjectName("writerHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setSpacing(4)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
         title = QLabel("文案写作")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #c0392b; padding: 8px;")
+        title.setObjectName("writerTitle")
         subtitle = QLabel("基于模板快速生成，或使用 AI 智能创作播音文案。")
-        subtitle.setStyleSheet("color: #666; padding: 0 8px 8px;")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        subtitle.setObjectName("writerSubtitle")
+        subtitle.setWordWrap(True)
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        layout.addWidget(header)
 
         # 标签页：模板生成 / AI 生成
         self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        self.tabs.setObjectName("writerTabs")
+        layout.addWidget(self.tabs, 1)
 
         # ---- 标签页 1：模板生成 ----
-        template_widget = QWidget()
-        template_layout = QVBoxLayout(template_widget)
+        template_widget = self._build_template_tab()
+        self.tabs.addTab(template_widget, "模板生成")
 
-        # 模板选择
-        select_group = QGroupBox("选择模板")
-        select_layout = QFormLayout(select_group)
+        # ---- 标签页 2：AI 生成 ----
+        ai_widget = self._build_ai_tab()
+        self.tabs.addTab(ai_widget, "AI 生成")
+
+        # ---- 底部：生成结果 ----
+        result_card = _Card("生成结果")
+        self.result_text = QTextEdit()
+        self.result_text.setObjectName("writerResult")
+        self.result_text.setPlaceholderText("生成的文案将显示在这里...")
+        self.result_text.setMinimumHeight(180)
+        result_card.main_layout.addWidget(self.result_text, 1)
+
+        # 结果操作按钮
+        result_btn_layout = QHBoxLayout()
+        result_btn_layout.setSpacing(12)
+
+        copy_btn = QPushButton("复制到剪贴板")
+        copy_btn.setObjectName("writerActionBtn")
+        copy_btn.clicked.connect(self._copy_result)
+        result_btn_layout.addWidget(copy_btn)
+
+        save_btn = QPushButton("保存为稿件")
+        save_btn.setObjectName("writerPrimaryBtn")
+        save_btn.clicked.connect(self._save_as_script)
+        result_btn_layout.addWidget(save_btn)
+
+        clear_btn = QPushButton("清空")
+        clear_btn.setObjectName("writerActionBtn")
+        clear_btn.clicked.connect(self._clear_result)
+        result_btn_layout.addWidget(clear_btn)
+
+        result_btn_layout.addStretch()
+        result_card.main_layout.addLayout(result_btn_layout)
+        layout.addWidget(result_card, 1)
+
+    def _build_template_tab(self) -> QWidget:
+        """构建模板生成标签页"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        root = QWidget()
+        root_layout = QVBoxLayout(root)
+        root_layout.setSpacing(18)
+        root_layout.setContentsMargins(4, 4, 4, 4)
+        root_layout.setAlignment(Qt.AlignTop)
+
+        # 模板选择卡片
+        select_card = _Card("选择模板")
+        select_form = self._create_form_layout()
 
         self.category_combo = QComboBox()
         self.category_combo.addItems(["新闻播报", "即兴评述", "模拟主持", "演讲"])
         self.category_combo.currentIndexChanged.connect(self._on_category_changed)
-        select_layout.addRow("类别：", self.category_combo)
+        select_form.addRow("类别：", self.category_combo)
 
         self.language_combo = QComboBox()
         self.language_combo.addItems(["中文", "英文"])
         self.language_combo.currentIndexChanged.connect(self._on_category_changed)
-        select_layout.addRow("语言：", self.language_combo)
+        select_form.addRow("语言：", self.language_combo)
 
         self.template_combo = QComboBox()
         self.template_combo.currentIndexChanged.connect(self._on_template_selected)
-        select_layout.addRow("模板：", self.template_combo)
+        select_form.addRow("模板：", self.template_combo)
 
-        template_layout.addWidget(select_group)
+        select_card.main_layout.addLayout(select_form)
+        root_layout.addWidget(select_card)
 
-        # 占位符填写区
-        self.placeholders_group = QGroupBox("填写内容")
-        self.placeholders_layout = QFormLayout(self.placeholders_group)
-        template_layout.addWidget(self.placeholders_group)
+        # 占位符填写卡片
+        placeholders_card = _Card("填写内容")
+        self.placeholders_layout = QFormLayout()
+        self.placeholders_layout.setSpacing(14)
+        self.placeholders_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.placeholders_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        placeholders_card.main_layout.addLayout(self.placeholders_layout)
+        root_layout.addWidget(placeholders_card)
 
         # 写作提示
         self.tips_label = QLabel()
-        self.tips_label.setStyleSheet("""
-            QLabel {
-                background-color: #fff3cd;
-                color: #856404;
-                padding: 10px;
-                border-radius: 6px;
-                border: 1px solid #ffeaa7;
-            }
-        """)
+        self.tips_label.setObjectName("writerTips")
         self.tips_label.setWordWrap(True)
-        template_layout.addWidget(self.tips_label)
+        self.tips_label.setVisible(False)
+        root_layout.addWidget(self.tips_label)
 
         # 生成按钮
         generate_btn = QPushButton("生成文案")
-        generate_btn.setMinimumHeight(40)
-        generate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #c0392b;
-                color: white;
-                font-size: 15px;
-                font-weight: bold;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #a93226; }
-        """)
+        generate_btn.setObjectName("writerPrimaryBtn")
+        generate_btn.setMinimumHeight(44)
         generate_btn.clicked.connect(self._generate_from_template)
-        template_layout.addWidget(generate_btn)
+        root_layout.addWidget(generate_btn)
 
-        self.tabs.addTab(template_widget, "模板生成")
+        scroll.setWidget(root)
+        return scroll
 
-        # ---- 标签页 2：AI 生成 ----
-        ai_widget = QWidget()
-        ai_layout = QVBoxLayout(ai_widget)
+    def _build_ai_tab(self) -> QWidget:
+        """构建 AI 生成标签页"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # API 配置
-        config_group = QGroupBox("API 配置")
-        config_form = QFormLayout(config_group)
+        root = QWidget()
+        root_layout = QVBoxLayout(root)
+        root_layout.setSpacing(18)
+        root_layout.setContentsMargins(4, 4, 4, 4)
+        root_layout.setAlignment(Qt.AlignTop)
+
+        # API 配置卡片
+        config_card = _Card("API 配置")
+        config_form = self._create_form_layout()
 
         self.api_url_edit = QLineEdit()
         self.api_url_edit.setPlaceholderText("https://api.openai.com/v1/chat/completions")
@@ -134,11 +213,12 @@ class ScriptWriterView(QWidget):
         self.temp_spin.setValue(0.7)
         config_form.addRow("创造性：", self.temp_spin)
 
-        ai_layout.addWidget(config_group)
+        config_card.main_layout.addLayout(config_form)
+        root_layout.addWidget(config_card)
 
-        # 生成参数
-        params_group = QGroupBox("生成参数")
-        params_form = QFormLayout(params_group)
+        # 生成参数卡片
+        params_card = _Card("生成参数")
+        params_form = self._create_form_layout()
 
         self.ai_category_combo = QComboBox()
         self.ai_category_combo.addItems(["新闻播报", "即兴评述", "模拟主持", "演讲稿"])
@@ -164,58 +244,42 @@ class ScriptWriterView(QWidget):
         self.extra_edit.setPlaceholderText("其他特殊要求（可选）")
         params_form.addRow("附加要求：", self.extra_edit)
 
-        ai_layout.addWidget(params_group)
+        params_card.main_layout.addLayout(params_form)
+        root_layout.addWidget(params_card)
+
+        # AI 不可用提示
+        if not is_ai_available():
+            ai_warn = QLabel("⚠ requests 库未安装，AI 生成功能不可用。\n请运行: pip install requests")
+            ai_warn.setObjectName("writerWarning")
+            ai_warn.setWordWrap(True)
+            root_layout.addWidget(ai_warn)
 
         # 生成按钮
         ai_generate_btn = QPushButton("AI 生成文案")
-        ai_generate_btn.setMinimumHeight(40)
-        ai_generate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #8e44ad;
-                color: white;
-                font-size: 15px;
-                font-weight: bold;
-                border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #7d3c98; }
-        """)
+        ai_generate_btn.setObjectName("writerAIBtn")
+        ai_generate_btn.setMinimumHeight(44)
         ai_generate_btn.clicked.connect(self._generate_with_ai)
-        ai_layout.addWidget(ai_generate_btn)
+        root_layout.addWidget(ai_generate_btn)
 
-        if not is_ai_available():
-            ai_warn = QLabel("⚠ requests 库未安装，AI 生成功能不可用。\n请运行: pip install requests")
-            ai_warn.setStyleSheet("color: #e74c3c; padding: 8px;")
-            ai_layout.addWidget(ai_warn)
+        scroll.setWidget(root)
+        return scroll
 
-        self.tabs.addTab(ai_widget, "AI 生成")
+    def _create_form_layout(self) -> QFormLayout:
+        """创建统一的表单布局"""
+        form = QFormLayout()
+        form.setSpacing(14)
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.DontWrapRows)
+        return form
 
-        # ---- 底部：生成结果 ----
-        result_group = QGroupBox("生成结果")
-        result_layout = QVBoxLayout(result_group)
-
-        self.result_text = QTextEdit()
-        self.result_text.setPlaceholderText("生成的文案将显示在这里...")
-        self.result_text.setMinimumHeight(200)
-        result_layout.addWidget(self.result_text)
-
-        # 结果操作按钮
-        result_btn_layout = QHBoxLayout()
-
-        copy_btn = QPushButton("复制到剪贴板")
-        copy_btn.clicked.connect(self._copy_result)
-        result_btn_layout.addWidget(copy_btn)
-
-        save_btn = QPushButton("保存为稿件")
-        save_btn.setStyleSheet("background-color: #27ae60; color: white;")
-        save_btn.clicked.connect(self._save_as_script)
-        result_btn_layout.addWidget(save_btn)
-
-        clear_btn = QPushButton("清空")
-        clear_btn.clicked.connect(self._clear_result)
-        result_btn_layout.addWidget(clear_btn)
-
-        result_layout.addLayout(result_btn_layout)
-        layout.addWidget(result_group)
+    def _create_line_edit(self, placeholder: str = "") -> QLineEdit:
+        """创建统一风格的单行输入框"""
+        edit = QLineEdit()
+        edit.setMinimumHeight(34)
+        if placeholder:
+            edit.setPlaceholderText(placeholder)
+        return edit
 
     def _load_templates(self):
         """加载模板到下拉框"""
@@ -260,19 +324,28 @@ class ScriptWriterView(QWidget):
             item = self.placeholders_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+            elif item.layout():
+                # 清理子布局中的控件
+                while item.layout().count():
+                    child = item.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
 
         # 创建占位符输入框
         self._placeholder_inputs = {}
         placeholders = template.get("placeholders", {})
         for key, desc in placeholders.items():
-            edit = QLineEdit()
-            edit.setPlaceholderText(desc)
+            edit = self._create_line_edit(desc)
             self.placeholders_layout.addRow(f"{key}：", edit)
             self._placeholder_inputs[key] = edit
 
         # 显示写作提示
         tips = template.get("tips", "")
-        self.tips_label.setText(f"💡 写作提示：{tips}" if tips else "")
+        if tips:
+            self.tips_label.setText(f"💡 写作提示：{tips}")
+            self.tips_label.setVisible(True)
+        else:
+            self.tips_label.setVisible(False)
 
     def _generate_from_template(self):
         """从模板生成文案"""

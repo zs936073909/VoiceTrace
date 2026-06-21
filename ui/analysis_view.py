@@ -4,7 +4,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QMessageBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSlider, QGroupBox, QCheckBox
+    QSlider, QGroupBox, QCheckBox, QTextEdit
 )
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QScatterSeries
 from PySide6.QtCore import Qt, QUrl, QPointF, QRectF
@@ -259,6 +259,17 @@ class AnalysisView(QWidget):
         self.standard_label.setStyleSheet("font-size: 14px;")
         layout.addWidget(self.standard_label)
 
+        # 智能分析结论
+        insights_group = QGroupBox("分析意见与改进建议")
+        insights_layout = QVBoxLayout(insights_group)
+        self.insights_text = QTextEdit()
+        self.insights_text.setReadOnly(True)
+        self.insights_text.setPlaceholderText("分析后将在此给出针对性改进建议...")
+        self.insights_text.setMinimumHeight(120)
+        self.insights_text.setMaximumHeight(200)
+        insights_layout.addWidget(self.insights_text)
+        layout.addWidget(insights_group)
+
         # 回放控制
         playback_layout = QHBoxLayout()
         self.play_btn = QPushButton("播放录音")
@@ -410,6 +421,10 @@ class AnalysisView(QWidget):
                 self.standard_label.setStyleSheet("font-size: 14px; color: #cc4444;")
                 self.standard_label.setText(f"✗ {std_result['message']}")
 
+            # 智能分析结论
+            insights = self._generate_insights(result, script, std_result)
+            self.insights_text.setHtml(insights)
+
             # 更新趋势图
             self._update_chart(rec_id)
 
@@ -558,6 +573,169 @@ class AnalysisView(QWidget):
             else:
                 text = str(value)
             self.prosody_table.setItem(i, 1, QTableWidgetItem(text))
+
+    def _generate_insights(self, result: dict, script, std_result: dict) -> str:
+        """根据分析结果生成针对性改进建议"""
+        lines = ["<html><body style='font-size: 13px; line-height: 1.6;'>"]
+        lines.append("<h3>综合诊断</h3>")
+
+        rate = result["speech_rate"]
+        pause_count = result["pause_count"]
+        total_pause = result["total_pause_duration"]
+        duration = result["duration"]
+        energy = result["rms_energy"]
+        prosody = result.get("prosody") or {}
+        alignment = result.get("alignment") or {}
+
+        unit = "CPM" if script.language == "chinese" else "WPM"
+
+        # 1. 语速结论
+        if std_result["status"] == "pass":
+            lines.append(f"<p>✅ <b>语速控制良好</b>，当前为 <b>{rate:.0f} {unit}</b>，符合所选类别的标准区间。保持这种节奏感。</p>")
+        else:
+            delta = std_result.get("delta", 0)
+            if delta > 0:
+                lines.append(
+                    f"<p>⚠️ <b>语速偏快</b>：当前 <b>{rate:.0f} {unit}</b>，超出标准上限约 <b>{delta:.0f} {unit}</b>。"
+                    f"建议适当放慢，尤其在关键句、数据、金句处增加停顿，让听众有消化时间。</p>"
+                )
+            else:
+                lines.append(
+                    f"<p>⚠️ <b>语速偏慢</b>：当前 <b>{rate:.0f} {unit}</b>，低于标准下限约 <b>{abs(delta):.0f} {unit}</b>。"
+                    f"尝试减少不必要的停顿，保持语流连贯，避免听众注意力分散。</p>"
+                )
+
+        # 2. 卡顿/停顿结论
+        if duration > 0:
+            pause_ratio = total_pause / duration
+            if pause_count == 0:
+                lines.append("<p>✅ <b>语流连贯</b>：未检测到明显卡顿或过长停顿。</p>")
+            elif pause_ratio < 0.1:
+                lines.append(
+                    f"<p>⚠️ <b>停顿偏少但存在 {pause_count} 处卡顿</b>。"
+                    f"总停顿时长 {total_pause:.1f}s，占比 {pause_ratio:.1%}。"
+                    f"注意区分'生理性卡顿'和'语义性停顿'，在句群之间适当增加换气停顿。</p>"
+                )
+            elif pause_ratio > 0.25:
+                lines.append(
+                    f"<p>⚠️ <b>停顿占比偏高</b>：检测到 {pause_count} 处停顿，总时长 {total_pause:.1f}s（{pause_ratio:.1%}）。"
+                    f"建议先通读稿件熟悉内容，减少因忘词导致的空白；同时检查是否有过多气口。</p>"
+                )
+            else:
+                lines.append(
+                    f"<p>ℹ️ <b>停顿节奏正常</b>：{pause_count} 处停顿，总时长 {total_pause:.1f}s（{pause_ratio:.1%}）。"
+                    f"如果部分停顿发生在句子中间，可重点练习该句的断句。</p>"
+                )
+
+        # 3. 音量/能量结论
+        if energy > 0.3:
+            lines.append("<p>✅ <b>音量充沛</b>：声音能量充足，适合播音主持场景。</p>")
+        elif energy > 0.15:
+            lines.append("<p>ℹ️ <b>音量适中</b>：能量正常，若环境较吵可适当提高音量或靠近麦克风。</p>")
+        else:
+            lines.append(
+                "<p>⚠️ <b>音量偏小</b>：声音能量偏低，可能被环境噪声掩盖。"
+                "建议提高发声力度、拉近麦克风距离，或检查录音设备增益。</p>"
+            )
+
+        # 4. 韵律结论
+        if prosody:
+            f0_mean = prosody.get("f0_mean")
+            f0_std = prosody.get("f0_std")
+            hnr = prosody.get("hnr_mean")
+            tone_score = prosody.get("tone_score")
+
+            lines.append("<h3>韵律与音色</h3>")
+
+            if f0_std is not None:
+                if f0_std < 15:
+                    lines.append("<p>⚠️ <b>语调较平</b>：基频波动较小，听起来可能单调。尝试在强调处提高音高、句尾适当降调。</p>")
+                elif f0_std > 45:
+                    lines.append("<p>⚠️ <b>语调起伏过大</b>：基频波动明显，注意控制情绪表达，避免过度夸张。</p>")
+                else:
+                    lines.append("<p>✅ <b>语调自然</b>：基频波动适中，表达有层次感。</p>")
+
+            if hnr is not None:
+                if hnr < 10:
+                    lines.append("<p>⚠️ <b>噪音占比偏高</b>：谐噪比较低，建议改善录音环境或使用降噪功能。</p>")
+                else:
+                    lines.append("<p>✅ <b>音质清晰</b>：谐噪比良好，声音干净。</p>")
+
+            if tone_score is not None:
+                if tone_score < 60:
+                    lines.append(f"<p>⚠️ <b>声调稳定性不足</b>（得分 {tone_score:.0f}）。中文发音注意四声到位，避免滑音。</p>")
+                else:
+                    lines.append(f"<p>✅ <b>声调稳定</b>（得分 {tone_score:.0f}）。</p>")
+
+        # 5. 字级对齐结论
+        missing_count = 0
+        if alignment and alignment.get("sentences"):
+            for s in alignment["sentences"]:
+                for t in s.get("tokens", []):
+                    if t.get("is_missing"):
+                        missing_count += 1
+
+            if missing_count > 0:
+                lines.append(
+                    f"<p>⚠️ <b>漏读/错读检测</b>：字级对齐发现 <b>{missing_count}</b> 个字词与稿件不一致。"
+                    f"建议对照原文逐句检查，重点练习这些易错处。</p>"
+                )
+            else:
+                lines.append("<p>✅ <b>文本完整度好</b>：字级对齐未发现明显漏读或错读。</p>")
+
+        # 6. 逐句突出问题
+        sentence_json = result.get("sentence_analysis_json")
+        if sentence_json:
+            try:
+                sentences = json.loads(sentence_json)
+                problem_sentences = []
+                for s in sentences:
+                    s_rate = s.get("rate", 0)
+                    s_pauses = s.get("pause_count", 0)
+                    s_pause_dur = s.get("pause_duration", 0)
+                    if s_rate > rate * 1.3 or s_rate < rate * 0.7 or s_pauses >= 2 or s_pause_dur > 1.0:
+                        problem_sentences.append({
+                            "index": s.get("index", 0),
+                            "text": s.get("sentence", "")[:30],
+                            "rate": s_rate,
+                            "pauses": s_pauses,
+                            "pause_dur": s_pause_dur
+                        })
+
+                if problem_sentences:
+                    lines.append("<h3>需要重点练习的句子</h3><ul>")
+                    for ps in problem_sentences[:5]:
+                        reason = []
+                        if ps["rate"] > rate * 1.3:
+                            reason.append("语速偏快")
+                        elif ps["rate"] < rate * 0.7:
+                            reason.append("语速偏慢")
+                        if ps["pauses"] >= 2:
+                            reason.append("卡顿较多")
+                        if ps["pause_dur"] > 1.0:
+                            reason.append("停顿过长")
+                        lines.append(
+                            f"<li>第 {ps['index']} 句（{', '.join(reason)}）：{ps['text']}...</li>"
+                        )
+                    lines.append("</ul>")
+            except json.JSONDecodeError:
+                pass
+
+        # 7. 总体练习建议
+        lines.append("<h3>练习建议</h3><ul>")
+        if std_result["status"] != "pass":
+            lines.append("<li>使用'跟读模式'选择标准示范录音，对比语速和停顿节奏。</li>")
+        if pause_count > 3:
+            lines.append("<li>针对卡顿较多的句子，反复朗读直到流畅，再用录音功能检验。</li>")
+        if prosody and prosody.get("f0_std", 30) < 15:
+            lines.append("<li>做'语调练习'：用升调提问、降调陈述，录下来听差异。</li>")
+        if missing_count > 0:
+            lines.append("<li>打开'字级对齐'视图，对照红色标记逐字纠正发音。</li>")
+        lines.append("<li>保持每次录音后查看趋势图，观察语速、停顿等指标的变化。</li>")
+        lines.append("</ul>")
+
+        lines.append("</body></html>")
+        return "".join(lines)
 
     # ---- 回放 ----
 
