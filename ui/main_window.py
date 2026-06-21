@@ -15,6 +15,7 @@ from voicetrace.ui.progress_view import ProgressView
 from voicetrace.ui.export_dialog import ExportDialog
 from voicetrace.ui.posture_view import PostureView
 from voicetrace.ui.script_writer_view import ScriptWriterView
+from voicetrace.ui.realtime_coach_view import RealtimeCoachView
 from voicetrace.ui.styles import LIGHT_THEME, DARK_THEME
 
 
@@ -52,6 +53,10 @@ class MainWindow(QMainWindow):
         # 对比
         self.comparison_view = ComparisonView(self.db)
         self.tabs.addTab(self.comparison_view, "对比")
+
+        # 实时 AI 陪练
+        self.realtime_coach_view = RealtimeCoachView(self.db)
+        self.tabs.addTab(self.realtime_coach_view, "实时陪练")
 
         # 台风训练
         self.posture_view = PostureView(self.db)
