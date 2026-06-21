@@ -233,5 +233,5 @@ MIT License — 可自由使用、修改、分发
 ## 致谢
 
 - 基于 mimocode 2.5pro 开发第一版，trae glm5.2 开发第二版以及架构优化
-- 第三版韵律分析功能由 trae Kimi code 2.7 开发
+- 第三版（韵律分析、强制对齐、台风训练、稳定性优化）由 trae Kimi Code 2.7 制作
 - 所有开源依赖库的作者
