@@ -7,7 +7,8 @@ from contextlib import contextmanager
 
 from voicetrace.data.models import (
     Script, Recording, Stumble, Analysis, Comparison,
-    CustomStandard, PostureRecord, ScriptTemplate
+    CustomStandard, PostureRecord, ScriptTemplate,
+    MemoryCard, ReviewLog
 )
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,39 @@ class Database:
                 structure_json TEXT,
                 tips TEXT
             );
+            CREATE TABLE IF NOT EXISTS memory_cards (
+                id INTEGER PRIMARY KEY,
+                card_id TEXT NOT NULL UNIQUE,
+                script_id INTEGER,
+                segment_index INTEGER DEFAULT 0,
+                front TEXT DEFAULT '',
+                back TEXT DEFAULT '',
+                hint TEXT DEFAULT '',
+                scenario TEXT DEFAULT 'speech',
+                tags_json TEXT,
+                state INTEGER DEFAULT 0,
+                step INTEGER DEFAULT 0,
+                stability REAL DEFAULT 0.0,
+                difficulty REAL DEFAULT 0.0,
+                last_review REAL,
+                reps INTEGER DEFAULT 0,
+                lapses INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS review_logs (
+                id INTEGER PRIMARY KEY,
+                card_id TEXT NOT NULL,
+                rating INTEGER NOT NULL,
+                review_duration REAL DEFAULT 0.0,
+                reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                state_before INTEGER DEFAULT 0,
+                state_after INTEGER DEFAULT 0,
+                stability_before REAL DEFAULT 0.0,
+                stability_after REAL DEFAULT 0.0,
+                retrievability REAL DEFAULT 0.0,
+                FOREIGN KEY (card_id) REFERENCES memory_cards(card_id) ON DELETE CASCADE
+            );
         """)
         self.conn.commit()
 
@@ -158,6 +192,12 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_comparisons_baseline_id ON comparisons(baseline_id);
             CREATE INDEX IF NOT EXISTS idx_posture_date ON posture_records(date);
             CREATE INDEX IF NOT EXISTS idx_posture_recording_id ON posture_records(recording_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_cards_card_id ON memory_cards(card_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_cards_script_id ON memory_cards(script_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_cards_state ON memory_cards(state);
+            CREATE INDEX IF NOT EXISTS idx_memory_cards_last_review ON memory_cards(last_review);
+            CREATE INDEX IF NOT EXISTS idx_review_logs_card_id ON review_logs(card_id);
+            CREATE INDEX IF NOT EXISTS idx_review_logs_reviewed_at ON review_logs(reviewed_at);
         """)
         self.conn.commit()
 
@@ -496,6 +536,152 @@ class Database:
             ScriptTemplate(
                 id=r["id"], name=r["name"], category=r["category"],
                 language=r["language"], structure_json=r["structure_json"], tips=r["tips"]
+            )
+            for r in rows
+        ]
+
+    # ---- MemoryCard CRUD ----
+
+    def upsert_memory_card(self, card: MemoryCard) -> int:
+        """插入或更新记忆卡片（基于 card_id 唯一）"""
+        if not card.card_id:
+            raise ValueError("card_id 不能为空")
+        cursor = self.conn.execute(
+            """INSERT INTO memory_cards
+               (card_id, script_id, segment_index, front, back, hint, scenario,
+                tags_json, state, step, stability, difficulty, last_review,
+                reps, lapses)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(card_id) DO UPDATE SET
+                 script_id=excluded.script_id,
+                 segment_index=excluded.segment_index,
+                 front=excluded.front,
+                 back=excluded.back,
+                 hint=excluded.hint,
+                 scenario=excluded.scenario,
+                 tags_json=excluded.tags_json,
+                 state=excluded.state,
+                 step=excluded.step,
+                 stability=excluded.stability,
+                 difficulty=excluded.difficulty,
+                 last_review=excluded.last_review,
+                 reps=excluded.reps,
+                 lapses=excluded.lapses""",
+            (card.card_id, card.script_id, card.segment_index,
+             card.front, card.back, card.hint, card.scenario,
+             card.tags_json, card.state, card.step, card.stability,
+             card.difficulty, card.last_review, card.reps, card.lapses)
+        )
+        self.conn.commit()
+        # 返回 card_id 对应的行 id
+        row = self.conn.execute(
+            "SELECT id FROM memory_cards WHERE card_id = ?", (card.card_id,)
+        ).fetchone()
+        return row["id"] if row else cursor.lastrowid
+
+    def get_memory_card(self, card_id: str) -> Optional[MemoryCard]:
+        row = self.conn.execute(
+            "SELECT * FROM memory_cards WHERE card_id = ?", (card_id,)
+        ).fetchone()
+        return self._row_to_memory_card(row) if row else None
+
+    def list_memory_cards(
+        self,
+        script_id: Optional[int] = None,
+        scenario: Optional[str] = None,
+    ) -> List[MemoryCard]:
+        """列出记忆卡片，可按稿件/场景过滤"""
+        sql = "SELECT * FROM memory_cards"
+        conditions = []
+        params: list = []
+        if script_id is not None:
+            conditions.append("script_id = ?")
+            params.append(script_id)
+        if scenario is not None:
+            conditions.append("scenario = ?")
+            params.append(scenario)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY segment_index ASC"
+        rows = self.conn.execute(sql, params).fetchall()
+        return [self._row_to_memory_card(r) for r in rows]
+
+    def delete_memory_cards_by_script(self, script_id: int) -> int:
+        """删除某稿件下的所有记忆卡片（含复习日志）"""
+        if script_id is None:
+            return 0
+        cursor = self.conn.execute(
+            "DELETE FROM memory_cards WHERE script_id = ?", (script_id,)
+        )
+        self.conn.commit()
+        return cursor.rowcount
+
+    def _row_to_memory_card(self, row) -> MemoryCard:
+        return MemoryCard(
+            id=row["id"],
+            card_id=row["card_id"],
+            script_id=row["script_id"],
+            segment_index=row["segment_index"],
+            front=row["front"] or "",
+            back=row["back"] or "",
+            hint=row["hint"] or "",
+            scenario=row["scenario"] or "speech",
+            tags_json=row["tags_json"],
+            state=row["state"] or 0,
+            step=row["step"] or 0,
+            stability=row["stability"] or 0.0,
+            difficulty=row["difficulty"] or 0.0,
+            last_review=row["last_review"],
+            reps=row["reps"] or 0,
+            lapses=row["lapses"] or 0,
+            created_at=row["created_at"],
+        )
+
+    # ---- ReviewLog CRUD ----
+
+    def create_review_log(self, log: ReviewLog) -> int:
+        if not log.card_id:
+            raise ValueError("card_id 不能为空")
+        cursor = self.conn.execute(
+            """INSERT INTO review_logs
+               (card_id, rating, review_duration, reviewed_at,
+                state_before, state_after, stability_before,
+                stability_after, retrievability)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (log.card_id, log.rating, log.review_duration,
+             log.reviewed_at or datetime.now().isoformat(),
+             log.state_before, log.state_after,
+             log.stability_before, log.stability_after,
+             log.retrievability)
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def list_review_logs(
+        self,
+        card_id: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[ReviewLog]:
+        sql = "SELECT * FROM review_logs"
+        params: list = []
+        if card_id is not None:
+            sql += " WHERE card_id = ?"
+            params.append(card_id)
+        sql += " ORDER BY reviewed_at DESC LIMIT ?"
+        params.append(max(1, min(limit, 10000)))
+        rows = self.conn.execute(sql, params).fetchall()
+        return [
+            ReviewLog(
+                id=r["id"],
+                card_id=r["card_id"],
+                rating=r["rating"],
+                review_duration=r["review_duration"] or 0.0,
+                reviewed_at=r["reviewed_at"],
+                state_before=r["state_before"] or 0,
+                state_after=r["state_after"] or 0,
+                stability_before=r["stability_before"] or 0.0,
+                stability_after=r["stability_after"] or 0.0,
+                retrievability=r["retrievability"] or 0.0,
             )
             for r in rows
         ]

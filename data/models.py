@@ -98,3 +98,45 @@ class ScriptTemplate:
     structure_json: Optional[str] = None  # 结构化模板数据
     tips: Optional[str] = None  # 写作提示
     id: Optional[int] = None
+
+
+@dataclass
+class MemoryCard:
+    """记忆卡片（背诵训练核心数据结构）
+
+    基于 FSRS-5 DSR 模型跟踪记忆状态。
+    """
+    card_id: str                       # 唯一 ID（f"script_{sid}_seg_{idx}"）
+    script_id: Optional[int] = None    # 关联稿件 ID
+    segment_index: int = 0             # 段落序号
+    front: str = ""                    # 正面（提示，如关键词、上文）
+    back: str = ""                     # 背面（答案，如完整段落）
+    hint: str = ""                     # 额外提示
+    scenario: str = "speech"           # 'speech' | 'host' | 'emergency'
+    tags_json: Optional[str] = None    # 标签 JSON
+
+    # FSRS 状态
+    state: int = 0                     # 0=New, 1=Learning, 2=Review, 3=Relearning
+    step: int = 0
+    stability: float = 0.0
+    difficulty: float = 0.0
+    last_review: Optional[float] = None  # Unix 时间戳
+    reps: int = 0
+    lapses: int = 0
+    created_at: Optional[str] = None    # ISO 时间字符串
+    id: Optional[int] = None
+
+
+@dataclass
+class ReviewLog:
+    """复习日志（每次评分的记录）"""
+    card_id: str
+    rating: int                        # 1=Again, 2=Hard, 3=Good, 4=Easy
+    review_duration: float = 0.0       # 本次复习耗时（秒）
+    reviewed_at: Optional[str] = None  # ISO 时间字符串
+    state_before: int = 0
+    state_after: int = 0
+    stability_before: float = 0.0
+    stability_after: float = 0.0
+    retrievability: float = 0.0
+    id: Optional[int] = None

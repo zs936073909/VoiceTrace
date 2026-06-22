@@ -1,8 +1,11 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QVBoxLayout, QWidget, QLabel, QPushButton
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction
+import logging
+
+logger = logging.getLogger(__name__)
 
 from voicetrace import DATA_DIR, DB_PATH, RECORDINGS_DIR
 from voicetrace.data.database import Database
@@ -15,6 +18,7 @@ from voicetrace.ui.export_dialog import ExportDialog
 from voicetrace.ui.posture_view import PostureView
 from voicetrace.ui.script_writer_view import ScriptWriterView
 from voicetrace.ui.realtime_coach_view import RealtimeCoachView
+from voicetrace.ui.memory_assist_view import MemoryAssistView
 from voicetrace.ui.llm_settings_dialog import show_llm_settings
 from voicetrace.ui.styles import LIGHT_THEME, DARK_THEME
 
@@ -42,6 +46,7 @@ class MainWindow(QMainWindow):
         self.comparison_view = ComparisonView(self.db)
         self.realtime_coach_view = RealtimeCoachView(self.db)
         self.posture_view = PostureView(self.db)
+        self.memory_assist_view = MemoryAssistView(self.db)
 
         # 导出占位页
         self._export_widget = QWidget()
@@ -71,6 +76,43 @@ class MainWindow(QMainWindow):
         # 菜单栏
         self._setup_menu()
 
+        # 启动后检查待复习卡片
+        QTimer.singleShot(800, self._check_due_reviews)
+
+    def _check_due_reviews(self):
+        """启动时检查今日待复习的记忆卡片"""
+        try:
+            from voicetrace.core.memory_scheduler import (
+                get_default_scheduler, State
+            )
+            scheduler = get_default_scheduler()
+            cards = self.db.list_memory_cards()
+            if not cards:
+                return
+            import time as _time
+            now = _time.time()
+            due_count = sum(
+                1 for dc in cards
+                if scheduler.is_due(
+                    type('C', (), {
+                        'state': dc.state, 'last_review': dc.last_review,
+                        'stability': dc.stability
+                    })(),
+                    now
+                )
+            )
+            new_count = sum(1 for dc in cards if dc.state == State.New.value)
+            if due_count > 0 or new_count > 0:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self, "背诵复习提醒",
+                    f"今日待复习卡片: <b>{due_count}</b> 张\n"
+                    f"待学习新卡: <b>{new_count}</b> 张\n\n"
+                    f"请到「背诵训练」标签页开始今日训练。"
+                )
+        except Exception as exc:
+            logger.warning(f"检查待复习失败: {exc}")
+
     def _build_tabs(self):
         """根据当前模式重建标签页"""
         self.tabs.clear()
@@ -81,6 +123,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.recording_panel, "录音")
         self.tabs.addTab(self.analysis_view, "分析")
         self.tabs.addTab(self.posture_view, "台风训练")
+        self.tabs.addTab(self.memory_assist_view, "背诵训练")
 
         if self._app_mode == "pro":
             self.tabs.addTab(self.follow_read_view, "跟读模式")
@@ -150,13 +193,14 @@ class MainWindow(QMainWindow):
             self,
             "关于 VoiceTrace",
             "<h3>VoiceTrace 声迹</h3>"
-            "<p>语音档案智能追踪系统 v2.0</p>"
+            "<p>语音档案智能追踪系统 v3.4</p>"
             "<p>面向播音主持专业学习者及语音训练需求的桌面应用。</p>"
-            "<p>核心功能：稿件管理 / 文案写作 / 录音 / 分析 / 台风训练</p>"
+            "<p>核心功能：稿件管理 / 文案写作 / 录音 / 分析 / 台风训练 / 背诵训练</p>"
             "<p>专业功能：跟读模式 / 对比 / 实时陪练 / 数据导出</p>"
             f"<p>当前模式：<b>{mode_text}</b>（可在「视图」菜单切换）</p>"
-            "<p style='color: #888;'>快捷键：Ctrl+R 开始/停止录音 · 空格 标记卡顿 · Ctrl+D 切换主题 · Ctrl+P 切换模式</p>"
-            "<p style='color: #888;'>台风训练需安装 MediaPipe：pip install mediapipe opencv-python</p>"
+            "<p style='color: #888;'>快捷键：Ctrl+R 开始/停止录音 · 空格 标记卡顿/显示答案 · "
+            "1-4 评分卡片 · Ctrl+D 切换主题 · Ctrl+P 切换模式</p>"
+            "<p style='color: #888;'>背诵训练基于 FSRS 间隔重复算法 + 主动回忆 + 测试效应</p>"
         )
 
     def _on_script_selected(self, script_id: int, title: str, content: str):
@@ -179,6 +223,8 @@ class MainWindow(QMainWindow):
             self.follow_read_view.refresh_recordings()
         elif widget is self.posture_view:
             self.posture_view._refresh_history()
+        elif widget is self.memory_assist_view:
+            self.memory_assist_view.refresh()
 
     def _open_export(self):
         dialog = ExportDialog(self.db, self)
