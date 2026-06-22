@@ -55,17 +55,6 @@ class Comparison:
 
 
 @dataclass
-class TrainingSession:
-    """训练打卡记录"""
-    script_id: Optional[int] = None
-    recording_id: Optional[int] = None
-    duration: float = 0.0  # 训练时长(秒)
-    notes: Optional[str] = None
-    id: Optional[int] = None
-    date: Optional[str] = None  # YYYY-MM-DD
-
-
-@dataclass
 class CustomStandard:
     """自定义语速标准"""
     name: str

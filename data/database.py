@@ -1,13 +1,13 @@
 import sqlite3
 import logging
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional, Union
 from contextlib import contextmanager
 
 from voicetrace.data.models import (
     Script, Recording, Stumble, Analysis, Comparison,
-    TrainingSession, CustomStandard, PostureRecord, ScriptTemplate
+    CustomStandard, PostureRecord, ScriptTemplate
 )
 
 logger = logging.getLogger(__name__)
@@ -93,17 +93,6 @@ class Database:
                 FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE,
                 FOREIGN KEY (baseline_id) REFERENCES recordings(id) ON DELETE CASCADE
             );
-            CREATE TABLE IF NOT EXISTS training_sessions (
-                id INTEGER PRIMARY KEY,
-                script_id INTEGER,
-                recording_id INTEGER,
-                duration REAL DEFAULT 0,
-                notes TEXT,
-                date TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE SET NULL,
-                FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE SET NULL
-            );
             CREATE TABLE IF NOT EXISTS custom_standards (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -167,7 +156,6 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_analyses_recording_id ON analyses(recording_id);
             CREATE INDEX IF NOT EXISTS idx_comparisons_recording_id ON comparisons(recording_id);
             CREATE INDEX IF NOT EXISTS idx_comparisons_baseline_id ON comparisons(baseline_id);
-            CREATE INDEX IF NOT EXISTS idx_training_date ON training_sessions(date);
             CREATE INDEX IF NOT EXISTS idx_posture_date ON posture_records(date);
             CREATE INDEX IF NOT EXISTS idx_posture_recording_id ON posture_records(recording_id);
         """)
@@ -398,61 +386,6 @@ class Database:
                 differences_json=row["differences_json"]
             )
         return None
-
-    # ---- TrainingSession CRUD ----
-
-    def create_training_session(self, session: TrainingSession) -> int:
-        if session.date is None:
-            session.date = datetime.now().strftime("%Y-%m-%d")
-        cursor = self.conn.execute(
-            "INSERT INTO training_sessions (script_id, recording_id, duration, notes, date) VALUES (?, ?, ?, ?, ?)",
-            (session.script_id, session.recording_id, session.duration, session.notes, session.date)
-        )
-        self.conn.commit()
-        return cursor.lastrowid
-
-    def list_training_sessions(self, limit: int = 100) -> List[TrainingSession]:
-        limit = max(1, min(limit, 10000))
-        rows = self.conn.execute(
-            "SELECT * FROM training_sessions ORDER BY created_at DESC LIMIT ?", (limit,)
-        ).fetchall()
-        return [
-            TrainingSession(
-                id=r["id"], script_id=r["script_id"], recording_id=r["recording_id"],
-                duration=r["duration"], notes=r["notes"], date=r["date"]
-            )
-            for r in rows
-        ]
-
-    def get_training_dates(self) -> List[str]:
-        """返回所有打卡日期列表 (YYYY-MM-DD)"""
-        rows = self.conn.execute("SELECT DISTINCT date FROM training_sessions ORDER BY date DESC").fetchall()
-        return [r["date"] for r in rows]
-
-    def get_training_stats(self) -> dict:
-        """获取训练统计"""
-        total = self.conn.execute("SELECT COUNT(*) as c FROM training_sessions").fetchone()["c"]
-        total_duration = self.conn.execute("SELECT COALESCE(SUM(duration), 0) as s FROM training_sessions").fetchone()["s"]
-        today = datetime.now().strftime("%Y-%m-%d")
-        today_count = self.conn.execute(
-            "SELECT COUNT(*) as c FROM training_sessions WHERE date = ?", (today,)
-        ).fetchone()["c"]
-        # 连续打卡天数
-        dates = self.get_training_dates()
-        streak = 0
-        check_date = datetime.now().strftime("%Y-%m-%d")
-        for d in dates:
-            if d == check_date:
-                streak += 1
-                check_date = (datetime.strptime(check_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-            elif d < check_date:
-                break
-        return {
-            "total_sessions": total,
-            "total_duration": total_duration,
-            "today_count": today_count,
-            "streak": streak
-        }
 
     # ---- CustomStandard CRUD ----
 

@@ -11,7 +11,7 @@ from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaPlayer, QAudi
 from PySide6.QtGui import QShortcut, QKeySequence
 
 from voicetrace.data.database import Database
-from voicetrace.data.models import Recording, Stumble, TrainingSession
+from voicetrace.data.models import Recording, Stumble
 
 
 class RecordingPanel(QWidget):
@@ -290,14 +290,6 @@ class RecordingPanel(QWidget):
                         recording_id=recording_id,
                         stumble_time=t
                     ))
-
-                # 自动创建训练打卡
-                self.db.create_training_session(TrainingSession(
-                    script_id=self.current_script_id,
-                    recording_id=recording_id,
-                    duration=duration,
-                    notes=f"录音: {self.current_script_title}"
-                ))
 
                 self._last_recording_path = filepath
                 self._last_recording_id = recording_id

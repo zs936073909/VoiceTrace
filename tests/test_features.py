@@ -11,12 +11,6 @@ def test_import_follow_read_view():
     assert FollowReadView is not None
 
 
-def test_import_progress_view():
-    from voicetrace.ui.progress_view import ProgressView, CalendarWidget
-    assert ProgressView is not None
-    assert CalendarWidget is not None
-
-
 def test_import_export_pdf():
     from voicetrace.utils.export import export_pdf
     assert export_pdf is not None
@@ -27,9 +21,8 @@ def test_import_main_window():
     assert MainWindow is not None
 
 
-def test_import_training_session_model():
-    from voicetrace.data.models import TrainingSession, CustomStandard
-    assert TrainingSession is not None
+def test_import_custom_standard_model():
+    from voicetrace.data.models import CustomStandard
     assert CustomStandard is not None
 
 
@@ -46,27 +39,6 @@ def test_comparator_report_fields():
     assert report["rate_delta"] == 10
     assert report["pause_delta"] == -2
     assert len(report["improvements"]) >= 2  # 语速提升 + 卡顿减少 + 相似度高
-
-
-def test_database_training_session():
-    """测试训练打卡 CRUD"""
-    from voicetrace.data.database import Database
-    from voicetrace.data.models import TrainingSession
-
-    with tempfile.TemporaryDirectory() as tmp:
-        db = Database(Path(tmp) / "test.db")
-        sid = db.create_training_session(TrainingSession(
-            duration=60.0,
-            notes="测试打卡"
-        ))
-        assert sid > 0
-        sessions = db.list_training_sessions(10)
-        assert len(sessions) == 1
-        assert sessions[0].duration == 60.0
-        stats = db.get_training_stats()
-        assert stats["total_sessions"] == 1
-        assert stats["total_duration"] == 60.0
-        db.close()
 
 
 def test_database_custom_standard():

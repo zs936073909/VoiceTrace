@@ -273,5 +273,5 @@ class FeedbackGenerator:
         return {
             "summary": ", ".join(summary_parts) if summary_parts else "分析完成",
             "suggestions": "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions)) if suggestions else "暂无特别建议，保持良好状态。",
-            "drills": "\n".join(f"{i+1}. {d}" for i, d in enumerate(drills)) if drills else "坚持每日录音打卡，观察趋势变化。"
+            "drills": "\n".join(f"{i+1}. {d}" for i, d in enumerate(drills)) if drills else "坚持每日录音练习，观察趋势变化。"
         }
