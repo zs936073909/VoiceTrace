@@ -307,6 +307,7 @@ class PostureView(QWidget):
                 'warning': self._get_warning(face_result)
             }
             self.camera_view.set_overlay(overlay)
+            self.camera_view.set_landmarks(face_result.landmarks)
 
         # 身体姿态分析
         if self._pose_analyzer:

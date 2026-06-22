@@ -1,6 +1,8 @@
 """面部分析核心模块：眼神追踪、表情分析、头部姿态检测
 
 基于 MediaPipe Face Landmarker（0.10.x Tasks API）实现台风训练中的镜头感分析。
+启用了 face blendshapes（52 维表情系数）和 facial transformation matrixes（4×4 头部姿态矩阵），
+相比纯几何计算，表情和头部姿态识别更稳定、更准确。
 所有计算在本地 CPU 完成，无需联网。
 """
 import math
@@ -8,7 +10,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Dict, Any
 
 import numpy as np
 
@@ -24,27 +26,6 @@ except ImportError:
     cv2 = None
 
 logger = logging.getLogger(__name__)
-
-# MediaPipe Face Landmarker 关键点索引
-# 眼睛相关
-LEFT_EYE = [362, 385, 387, 263, 373, 380]
-RIGHT_EYE = [33, 160, 158, 133, 153, 144]
-LEFT_IRIS = [468, 469, 470, 471, 472]
-RIGHT_IRIS = [473, 474, 475, 476, 477]
-# 嘴部
-MOUTH_LEFT = 61
-MOUTH_RIGHT = 291
-MOUTH_TOP = 13
-MOUTH_BOTTOM = 14
-# 眉毛
-LEFT_BROW = 105
-RIGHT_BROW = 334
-BROW_TOP_LEFT = 159
-BROW_TOP_RIGHT = 386
-# 头部姿态参考点
-NOSE_TIP = 1
-CHIN = 152
-FOREHEAD = 10
 
 # 关键点可见性阈值
 _VISIBILITY_THRESHOLD = 0.5
@@ -62,14 +43,18 @@ class FrameAnalysis:
     eye_contact: float = 0.0
     # 眨眼（True=闭眼）
     is_blinking: bool = False
-    # 表情（0-1，1=微笑）
+    # 表情（0-1，1=明显微笑）
     smile_score: float = 0.0
-    # 紧张度（0-1，1=非常紧张，皱眉）
+    # 紧张度（0-1，1=非常紧张，皱眉/抿嘴）
     tension_score: float = 0.0
     # 头部姿态（度）
     head_yaw: float = 0.0   # 左右转头
     head_pitch: float = 0.0  # 上下点头
     head_roll: float = 0.0   # 左右歪头
+    # 原始关键点（用于可视化）
+    landmarks: Optional[List[Any]] = None
+    # 调试信息
+    debug_info: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -103,29 +88,33 @@ class PostureAnalyzer:
             )
         self._model_path = Path(model_path) if model_path else DEFAULT_FACE_MODEL
         self._landmarker: Optional[FaceLandmarker] = None
-        self._blink_buffer = deque(maxlen=5)  # 用于眨眼检测
+        self._blink_buffer = deque(maxlen=5)
         self._last_blink_time = 0.0
         self._blink_count = 0
-        self._pose_history: deque = deque(maxlen=5)  # 头部姿态平滑
+        self._pose_history = deque(maxlen=5)
+
+        # 个人校准基准（可选）
+        self._calibration = None
 
     def initialize(self):
-        """初始化 MediaPipe Face Landmarker"""
+        """初始化 MediaPipe Face Landmarker（启用 blendshapes + transformation matrix）"""
         if self._landmarker is not None:
             return
         if not self._model_path.exists():
             raise FileNotFoundError(
                 f"Face Landmarker 模型文件不存在: {self._model_path}\n"
-                f"请从 https://developers.google.com/mediapipe/solutions/vision/face_landmarker 下载模型"
+                f"请运行 scripts/download_models.py 自动下载，或从官网手动下载。"
             )
         try:
             options = FaceLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=str(self._model_path)),
                 running_mode=RunningMode.VIDEO,
                 num_faces=1,
-                output_face_blendshapes=False,
-                output_facial_transformation_matrixes=False,
+                output_face_blendshapes=True,
+                output_facial_transformation_matrixes=True,
             )
             self._landmarker = FaceLandmarker.create_from_options(options)
+            logger.info("Face Landmarker 初始化成功（blendshapes + matrix 已启用）")
         except Exception as exc:
             logger.error(f"初始化 Face Landmarker 失败: {exc}")
             raise
@@ -141,14 +130,25 @@ class PostureAnalyzer:
         self.reset_state()
 
     def reset_state(self):
-        """重置会话状态（用于开始新训练）"""
+        """重置会话状态"""
         self._blink_buffer.clear()
         self._last_blink_time = 0.0
         self._blink_count = 0
         self._pose_history.clear()
 
+    def calibrate_neutral(self, frame_bgr: np.ndarray) -> bool:
+        """采集当前表情作为中性基准，用于个性化评分"""
+        result = self.analyze_frame(frame_bgr, 0.0)
+        if not result.face_detected:
+            return False
+        self._calibration = {
+            "smile": result.smile_score,
+            "tension": result.tension_score,
+            "eye_contact": result.eye_contact,
+        }
+        return True
+
     def _is_valid_frame(self, frame_bgr) -> bool:
-        """验证输入帧是否有效"""
         if frame_bgr is None:
             return False
         if not isinstance(frame_bgr, np.ndarray):
@@ -160,55 +160,88 @@ class PostureAnalyzer:
         return True
 
     def analyze_frame(self, frame_bgr: np.ndarray, timestamp: float) -> FrameAnalysis:
-        """分析单帧图像
-
-        Args:
-            frame_bgr: OpenCV BGR 格式图像
-            timestamp: 当前时间戳（秒）
-
-        Returns:
-            FrameAnalysis 分析结果
-        """
+        """分析单帧图像"""
         result = FrameAnalysis(timestamp=timestamp)
 
         if not self._is_valid_frame(frame_bgr):
+            result.debug_info["error"] = "无效帧"
             return result
 
         try:
             self.initialize()
-        except Exception:
+        except Exception as exc:
+            result.debug_info["error"] = f"初始化失败: {exc}"
             return result
 
         try:
-            h, w = frame_bgr.shape[:2]
             rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             mp_result = self._landmarker.detect_for_video(mp_image, int(timestamp * 1000))
         except Exception as exc:
             logger.warning(f"面部处理失败: {exc}")
+            result.debug_info["error"] = f"处理失败: {exc}"
             return result
 
         if not mp_result or not mp_result.face_landmarks:
+            result.debug_info["error"] = "未检测到面部"
             return result
 
         landmarks = mp_result.face_landmarks[0]
         if len(landmarks) < 478:
+            result.debug_info["error"] = f"关键点数量不足: {len(landmarks)}"
             return result
 
         result.face_detected = True
         lm = landmarks
+        result.landmarks = landmarks
 
-        # 1. 眼神交流检测（基于虹膜位置）
+        # 解析 blendshapes
+        blendshapes = {}
+        if mp_result.face_blendshapes and mp_result.face_blendshapes[0]:
+            for cat in mp_result.face_blendshapes[0].categories:
+                blendshapes[cat.category_name] = cat.score
+
+        # 解析 transformation matrix（4x4）
+        transform_matrix = None
+        if mp_result.facial_transformation_matrixes and len(mp_result.facial_transformation_matrixes) > 0:
+            transform_matrix = np.array(mp_result.facial_transformation_matrixes[0]).reshape(4, 4)
+
+        # 调试信息
+        result.debug_info = {
+            "landmark_count": len(landmarks),
+            "blendshape_count": len(blendshapes),
+            "has_matrix": transform_matrix is not None,
+            "blendshapes": {k: round(v, 3) for k, v in list(blendshapes.items())[:10]},
+        }
+
+        # 1. 头部姿态（基于 transformation matrix）
         try:
-            result.eye_contact = self._compute_eye_contact(lm, w, h)
+            if transform_matrix is not None:
+                yaw, pitch, roll = self._extract_euler_from_matrix(transform_matrix)
+                self._pose_history.append((yaw, pitch, roll))
+                result.head_yaw = float(np.median([p[0] for p in self._pose_history]))
+                result.head_pitch = float(np.median([p[1] for p in self._pose_history]))
+                result.head_roll = float(np.median([p[2] for p in self._pose_history]))
+            else:
+                result.head_yaw, result.head_pitch, result.head_roll = self._estimate_head_pose(lm)
+        except Exception as exc:
+            logger.debug(f"头部姿态估计失败: {exc}")
+
+        # 2. 眼神交流（基于 blendshapes + 头部姿态修正）
+        try:
+            result.eye_contact = self._compute_eye_contact(blendshapes, lm, result.head_yaw, result.head_pitch)
         except Exception as exc:
             logger.debug(f"眼神交流计算失败: {exc}")
             result.eye_contact = 0.0
 
-        # 2. 眨眼检测（基于眼睛纵横比 EAR）
+        # 3. 眨眼检测
         try:
-            ear = self._compute_eye_aspect_ratio(lm, w, h)
-            self._blink_buffer.append(ear)
+            blink_left = blendshapes.get("eyeBlinkLeft", 0.0)
+            blink_right = blendshapes.get("eyeBlinkRight", 0.0)
+            ear = self._compute_eye_aspect_ratio(lm)
+            # 混合判断：blendshape + 几何 EAR
+            blink_score = max((blink_left + blink_right) / 2.0, 1.0 - ear / 0.25)
+            self._blink_buffer.append(blink_score)
             result.is_blinking = self._detect_blink()
             if result.is_blinking and timestamp - self._last_blink_time > 0.15:
                 self._blink_count += 1
@@ -216,219 +249,184 @@ class PostureAnalyzer:
         except Exception as exc:
             logger.debug(f"眨眼检测失败: {exc}")
 
-        # 3. 微笑度（嘴角上扬程度）
+        # 4. 微笑度
         try:
-            result.smile_score = self._compute_smile(lm, w, h)
+            result.smile_score = self._compute_smile(blendshapes, lm)
         except Exception as exc:
             logger.debug(f"微笑度计算失败: {exc}")
-            result.smile_score = 0.0
 
-        # 4. 紧张度（皱眉程度）
+        # 5. 紧张度
         try:
-            result.tension_score = self._compute_tension(lm, w, h)
+            result.tension_score = self._compute_tension(blendshapes, lm)
         except Exception as exc:
             logger.debug(f"紧张度计算失败: {exc}")
-            result.tension_score = 0.0
 
-        # 5. 头部姿态（简化估计）
-        try:
-            yaw, pitch, roll = self._estimate_head_pose(lm, w, h)
-            # 平滑
-            self._pose_history.append((yaw, pitch, roll))
-            if len(self._pose_history) > 0:
-                result.head_yaw = float(np.mean([p[0] for p in self._pose_history]))
-                result.head_pitch = float(np.mean([p[1] for p in self._pose_history]))
-                result.head_roll = float(np.mean([p[2] for p in self._pose_history]))
-        except Exception as exc:
-            logger.debug(f"头部姿态估计失败: {exc}")
+        # 应用校准
+        if self._calibration:
+            result.smile_score = max(0.0, result.smile_score - self._calibration["smile"] * 0.5)
+            result.tension_score = max(0.0, result.tension_score - self._calibration["tension"] * 0.5)
 
         return result
 
-    def _landmark_visible(self, lm, idx: int) -> bool:
-        """检查关键点是否可见"""
-        try:
-            return getattr(lm[idx], "visibility", 1.0) >= _VISIBILITY_THRESHOLD
-        except Exception:
-            return False
+    @staticmethod
+    def _extract_euler_from_matrix(matrix: np.ndarray) -> tuple:
+        """从 4x4 变换矩阵提取 yaw/pitch/roll（度）"""
+        # matrix: canonical face model -> camera space
+        # 取旋转部分
+        R = matrix[:3, :3]
+        # MediaPipe 的矩阵可能包含缩放，先归一化
+        R = R / np.linalg.norm(R, axis=0, keepdims=True)
+
+        sy = math.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
+        singular = sy < 1e-6
+
+        if not singular:
+            x = math.atan2(R[2, 1], R[2, 2])
+            y = math.atan2(-R[2, 0], sy)
+            z = math.atan2(R[1, 0], R[0, 0])
+        else:
+            x = math.atan2(-R[1, 2], R[1, 1])
+            y = math.atan2(-R[2, 0], sy)
+            z = 0
+
+        return math.degrees(y), math.degrees(x), math.degrees(z)
+
+    def _compute_eye_contact(
+        self,
+        blendshapes: Dict[str, float],
+        lm,
+        head_yaw: float,
+        head_pitch: float
+    ) -> float:
+        """计算眼神交流得分
+
+        综合眼睛看向中心的 blendshape 和虹膜位置，并用头部姿态修正：
+        如果头部正对镜头，眼睛也看中心 → 直视镜头。
+        """
+        # blendshape 眼睛看向内侧/上方/下方
+        look_in = (blendshapes.get("eyeLookInLeft", 0.0) + blendshapes.get("eyeLookInRight", 0.0)) / 2.0
+        look_out = (blendshapes.get("eyeLookOutLeft", 0.0) + blendshapes.get("eyeLookOutRight", 0.0)) / 2.0
+        look_up = (blendshapes.get("eyeLookUpLeft", 0.0) + blendshapes.get("eyeLookUpRight", 0.0)) / 2.0
+        look_down = (blendshapes.get("eyeLookDownLeft", 0.0) + blendshapes.get("eyeLookDownRight", 0.0)) / 2.0
+
+        # 眼睛看向内侧越多，越可能是直视镜头
+        horizontal_score = max(0.0, 1.0 - look_out * 2.0)
+        vertical_score = max(0.0, 1.0 - (look_up + look_down) * 1.5)
+        gaze_score = (horizontal_score + vertical_score) / 2.0
+
+        # 用虹膜位置辅助
+        iris_score = self._compute_iris_center_score(lm)
+
+        # 头部姿态修正：正对镜头时眼神交流更容易得高分
+        head_penalty = min(1.0, (abs(head_yaw) + abs(head_pitch)) / 60.0)
+
+        score = (gaze_score * 0.4 + iris_score * 0.4) * (1.0 - head_penalty * 0.5)
+        return max(0.0, min(1.0, score))
+
+    def _compute_iris_center_score(self, lm) -> float:
+        """基于虹膜位置判断是否直视镜头"""
+        LEFT_IRIS = [468, 469, 470, 471, 472]
+        RIGHT_IRIS = [473, 474, 475, 476, 477]
+        LEFT_EYE = [362, 385, 387, 263, 373, 380]
+        RIGHT_EYE = [33, 160, 158, 133, 153, 144]
+
+        if not all(getattr(lm[i], "visibility", 1.0) >= _VISIBILITY_THRESHOLD for i in LEFT_IRIS + RIGHT_IRIS + LEFT_EYE + RIGHT_EYE):
+            return 0.5
+
+        left_iris_x = sum(lm[i].x for i in LEFT_IRIS) / len(LEFT_IRIS)
+        left_eye_x = sum(lm[i].x for i in LEFT_EYE) / len(LEFT_EYE)
+        right_iris_x = sum(lm[i].x for i in RIGHT_IRIS) / len(RIGHT_IRIS)
+        right_eye_x = sum(lm[i].x for i in RIGHT_EYE) / len(RIGHT_EYE)
+
+        left_iris_y = sum(lm[i].y for i in LEFT_IRIS) / len(LEFT_IRIS)
+        left_eye_y = sum(lm[i].y for i in LEFT_EYE) / len(LEFT_EYE)
+        right_iris_y = sum(lm[i].y for i in RIGHT_IRIS) / len(RIGHT_IRIS)
+        right_eye_y = sum(lm[i].y for i in RIGHT_EYE) / len(RIGHT_EYE)
+
+        x_offset = abs((left_iris_x - left_eye_x) + (right_iris_x - right_eye_x)) / 2.0
+        y_offset = abs((left_iris_y - left_eye_y) + (right_iris_y - right_eye_y)) / 2.0
+        offset = math.hypot(x_offset, y_offset)
+
+        # 偏移 < 0.03 视为直视
+        score = max(0.0, min(1.0, 1.0 - offset / 0.08))
+        return score
+
+    def _compute_eye_aspect_ratio(self, lm) -> float:
+        """计算眼睛纵横比 EAR"""
+        # 左眼竖直距离 374-386, 380-263; 水平 33-133
+        def eye_ear(v_top, v_bottom, h_left, h_right):
+            v = math.hypot(lm[v_top].x - lm[v_bottom].x, lm[v_top].y - lm[v_bottom].y)
+            h = math.hypot(lm[h_left].x - lm[h_right].x, lm[h_left].y - lm[h_right].y)
+            return (v + v) / (2.0 * h) if h > 0 else 0.3
+
+        left_ear = eye_ear(374, 386, 33, 133)
+        right_ear = eye_ear(159, 145, 33, 133)
+        return (left_ear + right_ear) / 2.0
 
     def _detect_blink(self) -> bool:
-        """基于缓冲区的眨眼检测，降低单帧抖动误触发"""
+        """基于缓冲区的眨眼检测"""
         if len(self._blink_buffer) < 3:
             return False
-        # 最近 3 帧中有 2 帧以上 EAR < 0.20 视为眨眼
         recent = list(self._blink_buffer)[-3:]
-        return sum(1 for ear in recent if ear < 0.20) >= 2
+        return sum(1 for s in recent if s > 0.55) >= 2
 
-    def _compute_eye_contact(self, lm, w: int, h: int) -> float:
-        """计算眼神交流得分（0-1）"""
-        # 检查关键点可见性
-        if not all(self._landmark_visible(lm, i) for i in LEFT_IRIS + RIGHT_IRIS + LEFT_EYE + RIGHT_EYE):
-            return 0.5
+    def _compute_smile(self, blendshapes: Dict[str, float], lm) -> float:
+        """微笑度：基于 mouthSmile blendshapes + 嘴角上扬几何"""
+        smile_left = blendshapes.get("mouthSmileLeft", 0.0)
+        smile_right = blendshapes.get("mouthSmileRight", 0.0)
+        smile_blend = (smile_left + smile_right) / 2.0
 
-        # 左眼虹膜中心
-        left_iris_x = sum(lm[i].x for i in LEFT_IRIS) / len(LEFT_IRIS) * w
-        left_iris_y = sum(lm[i].y for i in LEFT_IRIS) / len(LEFT_IRIS) * h
-        # 左眼眼眶中心
-        left_eye_x = sum(lm[i].x for i in LEFT_EYE) / len(LEFT_EYE) * w
-        left_eye_y = sum(lm[i].y for i in LEFT_EYE) / len(LEFT_EYE) * h
+        # 几何辅助：嘴宽 / 脸长
+        mouth_width = math.hypot(lm[291].x - lm[61].x, lm[291].y - lm[61].y)
+        face_height = math.hypot(lm[152].y - lm[10].y, lm[152].x - lm[10].x)
+        mouth_ratio = mouth_width / face_height if face_height > 0 else 0.0
 
-        # 右眼虹膜中心
-        right_iris_x = sum(lm[i].x for i in RIGHT_IRIS) / len(RIGHT_IRIS) * w
-        right_iris_y = sum(lm[i].y for i in RIGHT_IRIS) / len(RIGHT_IRIS) * h
-        # 右眼眼眶中心
-        right_eye_x = sum(lm[i].x for i in RIGHT_EYE) / len(RIGHT_EYE) * w
-        right_eye_y = sum(lm[i].y for i in RIGHT_EYE) / len(RIGHT_EYE) * h
+        # 综合 blendshape（主导）和几何
+        score = smile_blend * 0.7 + max(0.0, (mouth_ratio - 0.5) / 0.5) * 0.3
+        return max(0.0, min(1.0, score))
 
-        # 眼睛宽度（归一化基准）
-        eye_width = abs(lm[RIGHT_EYE[0]].x - lm[LEFT_EYE[3]].x) * w
-        if eye_width < 1:
-            return 0.5
+    def _compute_tension(self, blendshapes: Dict[str, float], lm) -> float:
+        """紧张度：基于皱眉、抿嘴、瞪眼 blendshapes"""
+        brow_down = (blendshapes.get("browDownLeft", 0.0) + blendshapes.get("browDownRight", 0.0)) / 2.0
+        brow_inner_up = blendshapes.get("browInnerUp", 0.0)
+        mouth_press = (blendshapes.get("mouthPressLeft", 0.0) + blendshapes.get("mouthPressRight", 0.0)) / 2.0
+        mouth_pucker = blendshapes.get("mouthPucker", 0.0)
+        eye_wide = (blendshapes.get("eyeWideLeft", 0.0) + blendshapes.get("eyeWideRight", 0.0)) / 2.0
 
-        # 虹膜偏移（归一化到眼睛宽度）
-        left_offset = math.hypot(left_iris_x - left_eye_x, left_iris_y - left_eye_y) / eye_width
-        right_offset = math.hypot(right_iris_x - right_eye_x, right_iris_y - right_eye_y) / eye_width
-        avg_offset = (left_offset + right_offset) / 2
-
-        # 偏移 < 0.1 视为直视，> 0.3 视为完全偏离
-        score = max(0.0, min(1.0, 1.0 - (avg_offset - 0.05) / 0.25))
-        return score
-
-    def _compute_eye_aspect_ratio(self, lm, w: int, h: int) -> float:
-        """计算眼睛纵横比 EAR（用于眨眼检测）"""
-        if not all(self._landmark_visible(lm, i) for i in (374, 386, 380, 263, 159, 145, 153, 144, 33, 133)):
-            return 0.3
-
-        # 左眼
-        v1 = math.hypot(
-            (lm[374].x - lm[386].x) * w,
-            (lm[374].y - lm[386].y) * h
+        # 皱眉 + 眉毛内抬（惊讶/紧张）+ 抿嘴 + 嘟嘴 + 瞪眼
+        tension = (
+            brow_down * 0.25 +
+            brow_inner_up * 0.15 +
+            mouth_press * 0.25 +
+            mouth_pucker * 0.15 +
+            eye_wide * 0.20
         )
-        v2 = math.hypot(
-            (lm[380].x - lm[263].x) * w,
-            (lm[380].y - lm[263].y) * h
-        )
-        horiz = math.hypot(
-            (lm[33].x - lm[133].x) * w,
-            (lm[33].y - lm[133].y) * h
-        )
-        if horiz < 1:
-            return 0.3
-        ear_left = (v1 + v2) / (2 * horiz)
+        return max(0.0, min(1.0, tension))
 
-        # 右眼
-        v1 = math.hypot(
-            (lm[159].x - lm[145].x) * w,
-            (lm[159].y - lm[145].y) * h
-        )
-        v2 = math.hypot(
-            (lm[153].x - lm[144].x) * w,
-            (lm[153].y - lm[144].y) * h
-        )
-        horiz = math.hypot(
-            (lm[33].x - lm[133].x) * w,
-            (lm[33].y - lm[133].y) * h
-        )
-        if horiz < 1:
-            return 0.3
-        ear_right = (v1 + v2) / (2 * horiz)
+    def _estimate_head_pose(self, lm) -> tuple:
+        """备用头部姿态估计（当 matrix 不可用时）"""
+        left_eye = np.array([lm[33].x, lm[33].y])
+        right_eye = np.array([lm[263].x, lm[263].y])
+        roll = math.degrees(math.atan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-        return (ear_left + ear_right) / 2
-
-    def _compute_smile(self, lm, w: int, h: int) -> float:
-        """计算微笑度（0-1）"""
-        if not all(self._landmark_visible(lm, i) for i in (MOUTH_LEFT, MOUTH_RIGHT, MOUTH_TOP, 168)):
-            return 0.0
-
-        mouth_width = math.hypot(
-            (lm[MOUTH_RIGHT].x - lm[MOUTH_LEFT].x) * w,
-            (lm[MOUTH_RIGHT].y - lm[MOUTH_LEFT].y) * h
-        )
-        # 嘴到眼睛距离（面部尺度参考）
-        eye_to_mouth = math.hypot(
-            (lm[168].x - lm[MOUTH_TOP].x) * w,
-            (lm[168].y - lm[MOUTH_TOP].y) * h
-        )
-        if eye_to_mouth < 1:
-            return 0.0
-        ratio = mouth_width / eye_to_mouth
-        # ratio 约 0.8-1.0 为正常，> 1.1 为微笑
-        score = max(0.0, min(1.0, (ratio - 0.85) / 0.35))
-        return score
-
-    def _compute_tension(self, lm, w: int, h: int) -> float:
-        """计算紧张度（0-1，皱眉程度）"""
-        if not all(self._landmark_visible(lm, i) for i in (LEFT_BROW, RIGHT_BROW, 159, 386, 168, MOUTH_TOP)):
-            return 0.0
-
-        # 左眉到左眼距离
-        left_brow_eye = math.hypot(
-            (lm[LEFT_BROW].x - lm[159].x) * w,
-            (lm[LEFT_BROW].y - lm[159].y) * h
-        )
-        # 右眉到右眼距离
-        right_brow_eye = math.hypot(
-            (lm[RIGHT_BROW].x - lm[386].x) * w,
-            (lm[RIGHT_BROW].y - lm[386].y) * h
-        )
-        avg_dist = (left_brow_eye + right_brow_eye) / 2
-
-        # 面部尺度参考（眼到嘴距离）
-        face_scale = math.hypot(
-            (lm[168].x - lm[MOUTH_TOP].x) * w,
-            (lm[168].y - lm[MOUTH_TOP].y) * h
-        )
-        if face_scale < 1:
-            return 0.0
-        ratio = avg_dist / face_scale
-        # ratio 约 0.6-0.8 为正常，< 0.5 为皱眉
-        score = max(0.0, min(1.0, (0.7 - ratio) / 0.3))
-        return score
-
-    def _estimate_head_pose(self, lm, w: int, h: int) -> Tuple[float, float, float]:
-        """简化头部姿态估计（度）"""
-        if not all(self._landmark_visible(lm, i) for i in (33, 263, NOSE_TIP, FOREHEAD, CHIN)):
-            return 0.0, 0.0, 0.0
-
-        # Roll: 基于双眼连线的角度
-        left_eye = np.array([lm[33].x * w, lm[33].y * h])
-        right_eye = np.array([lm[263].x * w, lm[263].y * h])
-        roll = math.degrees(math.atan2(
-            right_eye[1] - left_eye[1],
-            right_eye[0] - left_eye[0]
-        ))
-
-        # Yaw: 基于鼻尖到两眼中心的左右偏移
-        nose = np.array([lm[NOSE_TIP].x * w, lm[NOSE_TIP].y * h])
-        eye_center = (left_eye + right_eye) / 2
+        nose = np.array([lm[1].x, lm[1].y])
+        eye_center = (left_eye + right_eye) / 2.0
         eye_dist = np.linalg.norm(right_eye - left_eye)
-        if eye_dist > 1:
-            yaw_offset = (nose[0] - eye_center[0]) / eye_dist
-            yaw = math.degrees(math.asin(max(-1, min(1, yaw_offset * 2))))
-        else:
-            yaw = 0.0
+        yaw = 0.0
+        if eye_dist > 0:
+            yaw = math.degrees(math.asin(max(-1, min(1, (nose[0] - eye_center[0]) / eye_dist * 2))))
 
-        # Pitch: 基于鼻尖到下巴/额头比例
-        forehead = np.array([lm[FOREHEAD].x * w, lm[FOREHEAD].y * h])
-        chin = np.array([lm[CHIN].x * w, lm[CHIN].y * h])
+        forehead = np.array([lm[10].x, lm[10].y])
+        chin = np.array([lm[152].x, lm[152].y])
         face_height = np.linalg.norm(chin - forehead)
-        if face_height > 1:
-            nose_ratio = (nose[1] - forehead[1]) / face_height
-            # 正常约 0.5，抬头 < 0.45，低头 > 0.55
-            pitch = (nose_ratio - 0.5) * 180
-        else:
-            pitch = 0.0
+        pitch = 0.0
+        if face_height > 0:
+            pitch = ((nose[1] - forehead[1]) / face_height - 0.5) * 180
 
         return yaw, pitch, roll
 
     def summarize_session(self, timeline: List[FrameAnalysis]) -> SessionSummary:
-        """汇总训练会话结果
-
-        Args:
-            timeline: 所有帧的分析结果
-
-        Returns:
-            SessionSummary 汇总
-        """
+        """汇总训练会话结果"""
         if not timeline:
             return SessionSummary()
 
@@ -442,13 +440,12 @@ class PostureAnalyzer:
 
         # 眼神交流
         eye_contacts = [f.eye_contact for f in valid_frames]
-        eye_contact_ratio = sum(1 for e in eye_contacts if e > 0.6) / len(eye_contacts)
+        eye_contact_ratio = sum(1 for e in eye_contacts if e > 0.5) / len(eye_contacts)
         summary.eye_contact_ratio = eye_contact_ratio
         summary.eye_contact_score = min(100, eye_contact_ratio * 130)
 
-        # 记录眼神偏离时刻
         for f in valid_frames:
-            if f.eye_contact < 0.4:
+            if f.eye_contact < 0.35:
                 summary.gaze_away_moments.append(f.timestamp)
 
         # 眨眼
@@ -459,24 +456,17 @@ class PostureAnalyzer:
         # 表情
         smiles = [f.smile_score for f in valid_frames]
         summary.avg_smile = sum(smiles) / len(smiles)
-        summary.expression_score = min(100, summary.avg_smile * 120)
-
-        # 紧张度（反向：紧张越低分越高）
         tensions = [f.tension_score for f in valid_frames]
-        avg_tension = sum(tensions) / len(tensions)
-        summary.avg_tension = avg_tension
-        summary.expression_score = max(0, summary.expression_score - avg_tension * 30)
+        summary.avg_tension = sum(tensions) / len(tensions)
+        summary.expression_score = max(0, min(100, summary.avg_smile * 110 - summary.avg_tension * 40 + 30))
 
         # 头部姿态
         yaws = [abs(f.head_yaw) for f in valid_frames]
         pitches = [abs(f.head_pitch) for f in valid_frames]
         rolls = [abs(f.head_roll) for f in valid_frames]
-        avg_yaw = sum(yaws) / len(yaws)
-        avg_pitch = sum(pitches) / len(pitches)
-        avg_roll = sum(rolls) / len(rolls)
-        # 头部运动越小越好（< 10 度为佳）
-        summary.head_movement = (avg_yaw + avg_pitch + avg_roll) / 3
-        summary.head_pose_score = max(0, 100 - summary.head_movement * 4)
+        avg_movement = (sum(yaws) + sum(pitches) + sum(rolls)) / (3 * len(valid_frames))
+        summary.head_movement = avg_movement
+        summary.head_pose_score = max(0, 100 - avg_movement * 3)
 
         return summary
 

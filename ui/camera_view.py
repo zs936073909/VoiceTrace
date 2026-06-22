@@ -3,7 +3,7 @@
 用于台风训练时实时显示摄像头画面，支持叠加分析结果可视化。
 """
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Any
 
 import numpy as np
 
@@ -39,6 +39,8 @@ class CameraView(QWidget):
         self._is_running = False
         self._start_time = 0.0
         self._overlay_data = None  # 叠加显示的数据
+        self._landmarks = None     # 人脸关键点
+        self._show_landmarks = True
         self._mirror = True  # 镜像（自拍模式）
 
         self._init_ui()
@@ -68,22 +70,18 @@ class CameraView(QWidget):
         status_layout = QHBoxLayout()
         self._status_label = QLabel("就绪")
         self._status_label.setStyleSheet("color: #666; font-size: 12px;")
+        self._resolution_label = QLabel("")
+        self._resolution_label.setStyleSheet("color: #666; font-size: 12px;")
         self._time_label = QLabel("00:00")
         self._time_label.setStyleSheet("color: #c0392b; font-size: 16px; font-weight: bold;")
         status_layout.addWidget(self._status_label)
+        status_layout.addWidget(self._resolution_label)
         status_layout.addStretch()
         status_layout.addWidget(self._time_label)
         layout.addLayout(status_layout)
 
     def start(self, camera_index: int = 0) -> bool:
-        """启动摄像头
-
-        Args:
-            camera_index: 摄像头索引（0=默认摄像头）
-
-        Returns:
-            是否成功启动
-        """
+        """启动摄像头"""
         if not CV2_AVAILABLE:
             self._status_label.setText("错误：OpenCV 未安装")
             return False
@@ -97,9 +95,12 @@ class CameraView(QWidget):
             self._cap = None
             return False
 
-        # 设置分辨率
+        # 尝试设置分辨率，并读取实际值
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self._resolution_label.setText(f"{actual_w}x{actual_h}")
 
         self._is_running = True
         self._start_time = time.time()
@@ -115,25 +116,24 @@ class CameraView(QWidget):
             self._cap.release()
             self._cap = None
         self._status_label.setText("已停止")
+        self._resolution_label.setText("")
         self._overlay_data = None
+        self._landmarks = None
 
     def is_running(self) -> bool:
         return self._is_running
 
     def set_overlay(self, data: Optional[dict]):
-        """设置叠加显示数据
-
-        Args:
-            data: 包含分析结果的字典，例如：
-                {
-                    'eye_contact': 0.85,
-                    'smile': 0.6,
-                    'head_yaw': 5.2,
-                    'is_gesturing': True,
-                    'posture_ok': True,
-                }
-        """
+        """设置叠加显示数据"""
         self._overlay_data = data
+
+    def set_landmarks(self, landmarks: Optional[List[Any]]):
+        """设置人脸关键点，用于可视化"""
+        self._landmarks = landmarks
+
+    def set_show_landmarks(self, show: bool):
+        """设置是否显示人脸关键点"""
+        self._show_landmarks = show
 
     def set_mirror(self, mirror: bool):
         """设置是否镜像显示"""
@@ -167,10 +167,7 @@ class CameraView(QWidget):
 
     def _draw_overlay(self, frame: np.ndarray, timestamp: float) -> np.ndarray:
         """在帧上绘制叠加信息"""
-        if not self._overlay_data:
-            return frame
-
-        data = self._overlay_data
+        data = self._overlay_data or {}
         h, w = frame.shape[:2]
 
         # 半透明背景条
@@ -212,6 +209,34 @@ class CameraView(QWidget):
         if data.get('warning'):
             cv2.putText(frame, data['warning'], (20, h - 25),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 200), 2)
+
+        # 绘制人脸关键点
+        if self._show_landmarks and self._landmarks:
+            frame = self._draw_landmarks(frame, w, h)
+
+        return frame
+
+    def _draw_landmarks(self, frame: np.ndarray, w: int, h: int) -> np.ndarray:
+        """绘制 468 个人脸关键点，帮助用户确认检测状态"""
+        if not self._landmarks:
+            return frame
+
+        # 绘制轮廓和五官关键点（稀疏采样，避免太密集）
+        for i, lm in enumerate(self._landmarks):
+            if i % 3 != 0:
+                continue
+            x = int(lm.x * w)
+            y = int(lm.y * h)
+            cv2.circle(frame, (x, y), 1, (0, 255, 0), -1)
+
+        # 强调眼睛、鼻子、嘴巴中心
+        key_points = [1, 33, 133, 168, 291, 61, 263, 362, 13, 14, 152, 468, 473]
+        for idx in key_points:
+            if idx < len(self._landmarks):
+                lm = self._landmarks[idx]
+                x = int(lm.x * w)
+                y = int(lm.y * h)
+                cv2.circle(frame, (x, y), 3, (0, 0, 255), -1)
 
         return frame
 
