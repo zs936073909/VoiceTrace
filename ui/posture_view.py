@@ -12,19 +12,27 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QComboBox, QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QSplitter, QFrame, QScrollArea, QCheckBox
+    QSplitter, QFrame, QScrollArea, QCheckBox, QTextEdit
 )
 from PySide6.QtGui import QFont, QColor
 
 from voicetrace.data.models import PostureRecord
 from voicetrace.ui.camera_view import CameraView
 from voicetrace.ui.radar_chart import RadarChart
+import threading
+import time
+
+from voicetrace.core.llm_config_manager import get_llm_config_manager
+from voicetrace.ui.llm_settings_dialog import show_llm_settings
 
 try:
     from voicetrace.core.posture_analyzer import (
         PostureAnalyzer, FrameAnalysis, SessionSummary, is_mediapipe_available
     )
     from voicetrace.core.pose_analyzer import PoseAnalyzer, PoseSessionSummary
+    from voicetrace.core.posture_ai_coach import (
+        generate_summary, analyze_frame_image, generate_realtime_tip
+    )
     MEDIAPIPE_AVAILABLE = is_mediapipe_available()
 except ImportError:
     MEDIAPIPE_AVAILABLE = False
@@ -43,6 +51,15 @@ class PostureView(QWidget):
         self._face_timeline = []
         self._pose_timeline = []
         self._is_training = False
+        self._last_frame = None
+        self.llm_manager = get_llm_config_manager()
+
+        # 实时 AI 点拨状态
+        self._ai_tip_lock = threading.Lock()
+        self._last_ai_tip = ""
+        self._last_tip_time = 0.0
+        self._tip_worker_running = False
+        self._ai_mode = self.llm_manager.get_ai_mode()
 
         self._init_ui()
 
@@ -141,8 +158,13 @@ class PostureView(QWidget):
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._save_result)
 
+        self.ai_settings_btn = QPushButton("AI 设置")
+        self.ai_settings_btn.setMinimumHeight(40)
+        self.ai_settings_btn.clicked.connect(self._open_llm_settings)
+
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.ai_settings_btn)
         left_layout.addLayout(btn_layout)
 
         splitter.addWidget(left_widget)
@@ -170,6 +192,22 @@ class PostureView(QWidget):
         feedback_layout.addWidget(self.feedback_label)
 
         right_layout.addWidget(feedback_group)
+
+        # AI 总结
+        ai_group = QGroupBox("AI 教练总结")
+        ai_layout = QVBoxLayout(ai_group)
+
+        self.ai_mode_label = QLabel()
+        self.ai_mode_label.setWordWrap(True)
+        self._update_ai_mode_label()
+        ai_layout.addWidget(self.ai_mode_label)
+
+        self.ai_summary_text = QTextEdit()
+        self.ai_summary_text.setReadOnly(True)
+        self.ai_summary_text.setPlaceholderText("训练结束后，AI 教练会基于数据分析给出总结和建议。未配置 LLM 时将使用本地规则总结。")
+        self.ai_summary_text.setMinimumHeight(120)
+        ai_layout.addWidget(self.ai_summary_text)
+        right_layout.addWidget(ai_group)
 
         # 雷达图
         radar_group = QGroupBox("综合评分")
@@ -211,6 +249,32 @@ class PostureView(QWidget):
         self._feedback_timer.timeout.connect(self._update_feedback)
         self._feedback_timer.setInterval(500)
 
+    def _open_llm_settings(self):
+        """打开全局 LLM 设置"""
+        if show_llm_settings(self):
+            self._ai_mode = self.llm_manager.get_ai_mode()
+            self._update_ai_mode_label()
+
+    def _update_ai_mode_label(self):
+        """更新当前 AI 模式提示"""
+        text_available = self.llm_manager.is_text_available()
+        mm_available = self.llm_manager.is_multimodal_available()
+        if mm_available:
+            self.ai_mode_label.setText(
+                "当前模式：多模态模式（文本 LLM 生成总结 + 多模态 LLM 分析画面）"
+            )
+            self.ai_mode_label.setStyleSheet("color: #27ae60;")
+        elif text_available:
+            self.ai_mode_label.setText(
+                "当前模式：文本模式（仅文本 LLM 基于结构化数据生成建议）"
+            )
+            self.ai_mode_label.setStyleSheet("color: #2980b9;")
+        else:
+            self.ai_mode_label.setText(
+                "当前模式：本地规则模式（未配置 LLM，使用内置规则兜底）"
+            )
+            self.ai_mode_label.setStyleSheet("color: #7f8c8d;")
+
     def _toggle_training(self):
         """开始/停止训练"""
         if not MEDIAPIPE_AVAILABLE:
@@ -241,7 +305,12 @@ class PostureView(QWidget):
 
         self._face_timeline = []
         self._pose_timeline = []
+        self._last_frame = None
         self._is_training = True
+        self._last_tip_time = time.time()
+        with self._ai_tip_lock:
+            self._last_ai_tip = ""
+        self.ai_summary_text.clear()
         self.start_btn.setText("停止训练")
         self.start_btn.setStyleSheet("""
             QPushButton {
@@ -294,6 +363,8 @@ class PostureView(QWidget):
         if not self._is_training:
             return
 
+        self._last_frame = frame
+
         # 面部分析
         if self._posture_analyzer:
             face_result = self._posture_analyzer.analyze_frame(frame, timestamp)
@@ -327,16 +398,25 @@ class PostureView(QWidget):
         return ""
 
     def _update_feedback(self):
-        """更新实时反馈文字"""
+        """更新实时反馈文字（规则提示 + 可选 LLM 点拨）"""
         if not self._face_timeline:
             return
 
-        recent = self._face_timeline[-10:]  # 最近 10 帧
-        avg_eye = sum(f.eye_contact for f in recent) / len(recent)
-        avg_smile = sum(f.smile_score for f in recent) / len(recent)
-        avg_tension = sum(f.tension_score for f in recent) / len(recent)
+        recent_face = self._face_timeline[-10:]  # 最近 10 帧
+        avg_eye = sum(f.eye_contact for f in recent_face) / len(recent_face)
+        avg_smile = sum(f.smile_score for f in recent_face) / len(recent_face)
+        avg_tension = sum(f.tension_score for f in recent_face) / len(recent_face)
 
         feedback_parts = []
+
+        # 检查是否有新的 AI 点拨
+        ai_tip = ""
+        with self._ai_tip_lock:
+            ai_tip = self._last_ai_tip
+            self._last_ai_tip = ""
+        if ai_tip:
+            feedback_parts.append(f"🤖 AI 点拨：{ai_tip}")
+
         if avg_eye > 0.7:
             feedback_parts.append("✓ 眼神交流良好")
         elif avg_eye > 0.4:
@@ -349,14 +429,42 @@ class PostureView(QWidget):
         elif avg_tension > 0.5:
             feedback_parts.append("✗ 表情紧张，请放松面部")
 
-        if recent:
-            last = recent[-1]
+        if recent_face:
+            last = recent_face[-1]
             if abs(last.head_yaw) > 15:
                 feedback_parts.append(f"✗ 头部偏转 {last.head_yaw:.0f}°")
             if abs(last.head_roll) > 10:
                 feedback_parts.append(f"✗ 头部歪斜 {last.head_roll:.0f}°")
 
         self.feedback_label.setText("\n".join(feedback_parts))
+
+        # 每隔 5 秒触发一次文本 LLM 实时点拨（不阻塞 UI）
+        if self.llm_manager.is_text_available() and not self._tip_worker_running:
+            now = time.time()
+            if now - self._last_tip_time >= 5.0:
+                self._last_tip_time = now
+                self._tip_worker_running = True
+                recent_pose = self._pose_timeline[-10:] if self._pose_timeline else []
+                mode = "standing" if self.mode_combo.currentIndex() == 1 else "sit"
+                thread = threading.Thread(
+                    target=self._fetch_ai_tip,
+                    args=(recent_face.copy(), recent_pose.copy(), mode),
+                    daemon=True
+                )
+                thread.start()
+
+    def _fetch_ai_tip(self, face_recent, pose_recent, mode):
+        """在后台线程获取 AI 实时点拨"""
+        try:
+            tip = generate_realtime_tip(face_recent, pose_recent, mode)
+            if tip:
+                with self._ai_tip_lock:
+                    self._last_ai_tip = tip
+        except Exception as exc:
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning(f"获取 AI 实时点拨失败: {exc}")
+        finally:
+            self._tip_worker_running = False
 
     def _compute_summary(self):
         """计算训练汇总"""
@@ -396,6 +504,25 @@ class PostureView(QWidget):
         # 存储汇总用于保存
         self._last_face_summary = face_summary
         self._last_pose_summary = pose_summary
+
+        # AI 教练总结
+        self._generate_ai_summary(face_summary, pose_summary)
+
+    def _generate_ai_summary(self, face_summary, pose_summary):
+        """生成 AI 教练总结"""
+        mode = "standing" if self.mode_combo.currentIndex() == 1 else "sit"
+        self.ai_summary_text.setPlainText("AI 教练正在生成总结，请稍候...")
+
+        try:
+            text_summary = generate_summary(face_summary, pose_summary, mode)
+            # 仅多模态模式下才调用视觉分析
+            if self._ai_mode == "multimodal" and self._last_frame is not None:
+                mm_summary = analyze_frame_image(self._last_frame, face_summary, pose_summary, mode)
+                if mm_summary:
+                    text_summary += "\n\n---\n\n【多模态视觉分析】\n\n" + mm_summary
+            self.ai_summary_text.setMarkdown(text_summary)
+        except Exception as e:
+            self.ai_summary_text.setPlainText(f"AI 总结生成失败: {e}")
 
     def _update_detail_table(self, face_summary, pose_summary):
         """更新详细数据表"""

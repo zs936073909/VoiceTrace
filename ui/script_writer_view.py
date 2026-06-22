@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from voicetrace.core.script_writer import ScriptWriter, is_ai_available
+from voicetrace.core.llm_config_manager import get_llm_config_manager
+from voicetrace.ui.llm_settings_dialog import show_llm_settings
 from voicetrace.data.models import Script
 
 
@@ -48,9 +50,11 @@ class ScriptWriterView(QWidget):
         super().__init__()
         self.db = db
         self.writer = ScriptWriter()
+        self.llm_manager = get_llm_config_manager()
         self._current_template: Optional[dict] = None
         self._init_ui()
         self._load_templates()
+        self._sync_llm_settings()
 
     def _init_ui(self):
         self.setObjectName("scriptWriterView")
@@ -220,6 +224,18 @@ class ScriptWriterView(QWidget):
         self.temp_spin.setSingleStep(0.1)
         self.temp_spin.setValue(0.7)
         config_form.addRow("创造性：", self.temp_spin)
+
+        sync_layout = QHBoxLayout()
+        self.sync_llm_btn = QPushButton("从全局设置同步")
+        self.sync_llm_btn.setToolTip("从「设置」>「AI 大模型设置」同步配置")
+        self.sync_llm_btn.clicked.connect(self._sync_llm_settings)
+        sync_layout.addWidget(self.sync_llm_btn)
+
+        self.open_llm_settings_btn = QPushButton("打开 AI 设置")
+        self.open_llm_settings_btn.clicked.connect(self._open_llm_settings)
+        sync_layout.addWidget(self.open_llm_settings_btn)
+        sync_layout.addStretch()
+        config_form.addRow("", sync_layout)
 
         config_card.main_layout.addLayout(config_form)
         root_layout.addWidget(config_card)
@@ -411,6 +427,22 @@ class ScriptWriterView(QWidget):
             self.result_text.setPlainText(result.content)
         else:
             QMessageBox.warning(self, "生成失败", result.error)
+
+    def _open_llm_settings(self):
+        """打开全局 LLM 设置"""
+        if show_llm_settings(self):
+            self._sync_llm_settings()
+
+    def _sync_llm_settings(self):
+        """从全局 LLM 配置同步到当前页面"""
+        cfg = self.llm_manager.get_config()
+        if cfg.api_url:
+            self.api_url_edit.setText(cfg.api_url)
+        if cfg.api_key:
+            self.api_key_edit.setText(cfg.api_key)
+        if cfg.model:
+            self.model_edit.setText(cfg.model)
+        self.temp_spin.setValue(cfg.temperature)
 
     def _generate_with_ai(self):
         """使用 AI 生成文案"""

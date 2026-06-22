@@ -16,6 +16,7 @@ from voicetrace.ui.export_dialog import ExportDialog
 from voicetrace.ui.posture_view import PostureView
 from voicetrace.ui.script_writer_view import ScriptWriterView
 from voicetrace.ui.realtime_coach_view import RealtimeCoachView
+from voicetrace.ui.llm_settings_dialog import show_llm_settings
 from voicetrace.ui.styles import LIGHT_THEME, DARK_THEME
 
 
@@ -93,6 +94,13 @@ class MainWindow(QMainWindow):
         self._setup_menu()
 
     def _setup_menu(self):
+        # 设置菜单
+        settings_menu = self.menuBar().addMenu("设置")
+        llm_action = QAction("AI 大模型设置 (Ctrl+L)", self)
+        llm_action.setShortcut("Ctrl+L")
+        llm_action.triggered.connect(self._open_llm_settings)
+        settings_menu.addAction(llm_action)
+
         # 视图菜单 — 主题切换
         view_menu = self.menuBar().addMenu("视图")
         self.theme_action = QAction("切换深色主题 (Ctrl+D)", self)
@@ -105,6 +113,9 @@ class MainWindow(QMainWindow):
         about_action = QAction("关于 VoiceTrace", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _open_llm_settings(self):
+        show_llm_settings(self)
 
     def _toggle_theme(self):
         from PySide6.QtWidgets import QApplication

@@ -8,8 +8,9 @@
 - moonshot: Moonshot (Kimi) API
 - custom: 任意兼容 OpenAI Chat Completions 的自定义端点
 
-所有 Provider 最终都通过统一的 chat_completion 接口调用。
+所有 Provider 最终都通过统一的 chat_completion / vision_completion 接口调用。
 """
+import base64
 import json
 from dataclasses import dataclass
 from enum import Enum
@@ -101,7 +102,7 @@ class LLMService:
 
     def chat_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None
@@ -158,9 +159,94 @@ class LLMService:
                 error=f"LLM 调用失败: {str(e)}"
             )
 
+    def vision_completion(
+        self,
+        image_data: bytes,
+        prompt: str,
+        mime_type: str = "image/jpeg",
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        system_prompt: Optional[str] = None
+    ) -> LLMResponse:
+        """图像理解接口（多模态）
+
+        Args:
+            image_data: 图片二进制数据
+            prompt: 用户提示词
+            mime_type: 图片格式，如 image/jpeg / image/png
+            temperature: 覆盖配置的温度
+            max_tokens: 覆盖配置的最大 token
+            system_prompt: 系统提示词
+        """
+        if not REQUESTS_AVAILABLE:
+            return LLMResponse(
+                success=False,
+                error="requests 库未安装。请运行: pip install requests"
+            )
+
+        if not self.config.api_key:
+            return LLMResponse(
+                success=False,
+                error="API 密钥未配置"
+            )
+
+        if not self.config.api_url:
+            return LLMResponse(
+                success=False,
+                error="API 地址未配置"
+            )
+
+        provider = self.config.provider.lower()
+        temp = temperature if temperature is not None else self.config.temperature
+        tokens = max_tokens if max_tokens is not None else self.config.max_tokens
+
+        # 构建 OpenAI 兼容的 vision 消息
+        b64_image = base64.b64encode(image_data).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{b64_image}"
+
+        if provider == LLMProviderType.ANTHROPIC:
+            # Anthropic 图像格式
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": b64_image}},
+                    {"type": "text", "text": prompt}
+                ]
+            }]
+        else:
+            # OpenAI / NVIDIA / DeepSeek / Moonshot 兼容格式
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]
+            }]
+
+        try:
+            if provider == LLMProviderType.ANTHROPIC:
+                return self._call_anthropic(messages, temp, tokens, system_prompt)
+            else:
+                return self._call_openai_compatible(messages, temp, tokens, system_prompt)
+        except requests.exceptions.Timeout:
+            return LLMResponse(
+                success=False,
+                error="请求超时，请检查网络连接或增加超时时间"
+            )
+        except requests.exceptions.ConnectionError:
+            return LLMResponse(
+                success=False,
+                error="无法连接到 API 服务器，请检查 API 地址和网络"
+            )
+        except Exception as e:
+            return LLMResponse(
+                success=False,
+                error=f"LLM 调用失败: {str(e)}"
+            )
+
     def _call_openai_compatible(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: float,
         max_tokens: int,
         system_prompt: Optional[str]
@@ -202,7 +288,7 @@ class LLMService:
 
     def _call_anthropic(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         temperature: float,
         max_tokens: int,
         system_prompt: Optional[str]

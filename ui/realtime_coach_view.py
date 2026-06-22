@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 from voicetrace.data.database import Database
 from voicetrace.core.realtime_coach import RealtimeCoach
 from voicetrace.core.llm_service import LLMConfig, get_default_api_url, get_default_model
+from voicetrace.core.llm_config_manager import get_llm_config_manager
+from voicetrace.ui.llm_settings_dialog import show_llm_settings
 
 
 class RealtimeCoachView(QWidget):
@@ -27,6 +29,7 @@ class RealtimeCoachView(QWidget):
         super().__init__()
         self.db = db
         self.coach: Optional[RealtimeCoach] = None
+        self.llm_manager = get_llm_config_manager()
 
         self._audio_source = None
         self._audio_io = None
@@ -34,6 +37,7 @@ class RealtimeCoachView(QWidget):
 
         self._setup_ui()
         self._load_scripts()
+        self._sync_llm_settings()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -79,7 +83,7 @@ class RealtimeCoachView(QWidget):
         top_layout.addWidget(script_group)
 
         # LLM 配置
-        llm_group = QGroupBox("AI 教练配置（默认 NVIDIA）")
+        llm_group = QGroupBox("AI 教练配置（可独立配置，也可同步全局设置）")
         llm_layout = QHBoxLayout(llm_group)
         llm_layout.addWidget(QLabel("服务商:"))
         self.llm_provider_combo = QComboBox()
@@ -107,6 +111,16 @@ class RealtimeCoachView(QWidget):
         self.llm_url_edit.setMinimumWidth(200)
         self.llm_url_edit.setVisible(False)
         llm_layout.addWidget(self.llm_url_edit)
+
+        self.sync_llm_btn = QPushButton("同步全局设置")
+        self.sync_llm_btn.setToolTip("从「设置」>「AI 大模型设置」同步配置")
+        self.sync_llm_btn.clicked.connect(self._sync_llm_settings)
+        llm_layout.addWidget(self.sync_llm_btn)
+
+        self.open_llm_settings_btn = QPushButton("打开 AI 设置")
+        self.open_llm_settings_btn.clicked.connect(self._open_llm_settings)
+        llm_layout.addWidget(self.open_llm_settings_btn)
+
         llm_layout.addStretch()
         top_layout.addWidget(llm_group)
 
@@ -219,6 +233,25 @@ class RealtimeCoachView(QWidget):
             self.script_preview.setPlainText(script.content)
         else:
             self.script_preview.clear()
+
+    def _open_llm_settings(self):
+        """打开全局 LLM 设置"""
+        if show_llm_settings(self):
+            self._sync_llm_settings()
+
+    def _sync_llm_settings(self):
+        """从全局 LLM 配置同步到当前页面"""
+        cfg = self.llm_manager.get_config()
+        idx = self.llm_provider_combo.findData(cfg.provider)
+        if idx >= 0:
+            self.llm_provider_combo.setCurrentIndex(idx)
+        if cfg.api_key:
+            self.llm_key_edit.setText(cfg.api_key)
+        if cfg.model:
+            self.llm_model_edit.setText(cfg.model)
+        if cfg.api_url:
+            self.llm_url_edit.setText(cfg.api_url)
+        self._on_provider_changed(self.llm_provider_combo.currentIndex())
 
     def _on_provider_changed(self, index: int):
         """LLM 服务商切换"""
