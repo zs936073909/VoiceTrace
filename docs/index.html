@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoiceTrace 声迹 · 让每一次发声都被精准追踪</title>
+<meta name="description" content="面向播音主持专业学习者与演讲者的智能语音训练桌面系统，集成录音分析、台风训练、AI 陪练与科学背诵。">
+<meta property="og:title" content="VoiceTrace 声迹 · 智能语音档案追踪系统">
+<meta property="og:description" content="基于 FSRS-5 间隔重复算法、MediaPipe 姿态分析、faster-whisper 字级对齐的全流程语音训练桌面应用。">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=cinematic%20portrait%20of%20a%20confident%20speaker%20at%20a%20podium%20with%20sound%20waves%20visualized%20around%20them%2C%20dark%20teal%20and%20amber%20color%20palette%2C%20editorial%20magazine%20style%2C%20dramatic%20lighting&image_size=landscape_16_9">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="VoiceTrace 声迹">
+<meta name="twitter:description" content="智能语音档案追踪系统 · 字节跳动 Trae 编程黑客松参赛作品">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=JetBrains+Mono:wght@400;700&family=Noto+Serif+SC:wght@300;500;900&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #0e1414;
+    --bg-elevated: #161e1e;
+    --bg-card: #1a2424;
+    --fg: #f4ede0;
+    --fg-muted: #8a9591;
+    --accent: #e8a838;
+    --accent-glow: rgba(232, 168, 56, 0.18);
+    --teal: #4fb3a9;
+    --teal-deep: #2d6e68;
+    --crimson: #c84b3a;
+    --border: rgba(244, 237, 224, 0.08);
+    --border-strong: rgba(244, 237, 224, 0.18);
+    --grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+}
+[data-theme="light"] {
+    --bg: #f5f1e8;
+    --bg-elevated: #fbf8f1;
+    --bg-card: #ffffff;
+    --fg: #1a2424;
+    --fg-muted: #5a6663;
+    --accent: #b8771a;
+    --accent-glow: rgba(184, 119, 26, 0.15);
+    --teal: #2d6e68;
+    --teal-deep: #1a4845;
+    --crimson: #a83828;
+    --border: rgba(26, 36, 36, 0.1);
+    --border-strong: rgba(26, 36, 36, 0.22);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Noto Sans SC', sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+    position: relative;
+}
+body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: var(--grain);
+    opacity: 0.04;
+    pointer-events: none;
+    z-index: 100;
+    mix-blend-mode: overlay;
+}
+
+/* 导航 */
+.nav {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 50;
+    padding: 18px 5vw;
+    display: flex; justify-content: space-between; align-items: center;
+    backdrop-filter: blur(20px);
+    background: rgba(14, 20, 20, 0.6);
+    border-bottom: 1px solid var(--border);
+    transition: all 0.4s;
+}
+[data-theme="light"] .nav { background: rgba(245, 241, 232, 0.75); }
+.nav-logo {
+    font-family: 'Fraunces', serif;
+    font-weight: 900;
+    font-size: 22px;
+    letter-spacing: -0.02em;
+    display: flex; align-items: center; gap: 10px;
+}
+.nav-logo::before {
+    content: '';
+    width: 10px; height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 16px var(--accent-glow);
+    animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.7; }
+}
+.nav-links { display: flex; gap: 32px; align-items: center; }
+.nav-links a {
+    color: var(--fg-muted);
+    text-decoration: none;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    transition: color 0.3s;
+    font-family: 'JetBrains Mono', monospace;
+}
+.nav-links a:hover { color: var(--accent); }
+.theme-toggle {
+    background: none; border: 1px solid var(--border-strong);
+    color: var(--fg); cursor: pointer;
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.3s;
+    font-size: 14px;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); transform: rotate(20deg); }
+
+/* Hero */
+.hero {
+    min-height: 100vh;
+    padding: 140px 5vw 80px;
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 60px;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+.hero::before {
+    content: '';
+    position: absolute;
+    top: -20%; right: -10%;
+    width: 60vw; height: 60vw;
+    background: radial-gradient(circle, var(--accent-glow) 0%, transparent 60%);
+    filter: blur(60px);
+    z-index: 0;
+}
+.hero::after {
+    content: '';
+    position: absolute;
+    bottom: -30%; left: -20%;
+    width: 50vw; height: 50vw;
+    background: radial-gradient(circle, rgba(79, 179, 169, 0.12) 0%, transparent 60%);
+    filter: blur(80px);
+    z-index: 0;
+}
+.hero-content { position: relative; z-index: 2; }
+.hero-tag {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 6px 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 32px;
+    animation: fadeUp 0.8s 0.1s both;
+}
+.hero-tag::before {
+    content: ''; width: 6px; height: 6px;
+    background: var(--accent); border-radius: 50%;
+}
+.hero h1 {
+    font-family: 'Fraunces', 'Noto Serif SC', serif;
+    font-weight: 900;
+    font-size: clamp(48px, 7vw, 96px);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin-bottom: 28px;
+    animation: fadeUp 0.8s 0.2s both;
+}
+.hero h1 .italic {
+    font-style: italic;
+    font-weight: 300;
+    color: var(--accent);
+}
+.hero h1 .stroke {
+    -webkit-text-stroke: 1.5px var(--fg);
+    color: transparent;
+}
+.hero-sub {
+    font-size: 18px;
+    color: var(--fg-muted);
+    max-width: 540px;
+    margin-bottom: 40px;
+    animation: fadeUp 0.8s 0.3s both;
+    line-height: 1.7;
+}
+.hero-cta {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    animation: fadeUp 0.8s 0.4s both;
+}
+.btn {
+    padding: 16px 32px;
+    border: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    text-decoration: none;
+    display: inline-flex; align-items: center; gap: 10px;
+    position: relative;
+    overflow: hidden;
+}
+.btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: 700;
+}
+.btn-primary:hover {
+    background: var(--fg);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px var(--accent-glow);
+}
+.btn-ghost {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border-strong);
+}
+.btn-ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.btn .arrow { transition: transform 0.3s; }
+.btn:hover .arrow { transform: translateX(4px); }
+
+/* Hero visual - waveform */
+.hero-visual {
+    position: relative;
+    z-index: 2;
+    height: 480px;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    animation: fadeUp 1s 0.5s both;
+}
+.waveform-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 32px;
+    position: relative;
+}
+.waveform-header {
+    display: flex; justify-content: space-between;
+    margin-bottom: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-muted);
+    letter-spacing: 0.1em;
+}
+.waveform {
+    display: flex; align-items: center; gap: 3px;
+    height: 120px;
+}
+.wave-bar {
+    flex: 1;
+    background: linear-gradient(to top, var(--teal-deep), var(--accent));
+    border-radius: 2px;
+    animation: wave 1.6s ease-in-out infinite;
+    min-height: 8%;
+}
+@keyframes wave {
+    0%, 100% { transform: scaleY(0.3); }
+    50% { transform: scaleY(1); }
+}
+.waveform-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 16px; margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+.stat-mini { text-align: left; }
+.stat-mini-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-muted);
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+}
+.stat-mini-value {
+    font-family: 'Fraunces', serif;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--fg);
+}
+.stat-mini-value.accent { color: var(--accent); }
+
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 章节标题 */
+.section {
+    padding: 120px 5vw;
+    position: relative;
+}
+.section-header {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 60px;
+    margin-bottom: 80px;
+    align-items: end;
+}
+.section-number {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--accent);
+}
+.section-title {
+    font-family: 'Fraunces', 'Noto Serif SC', serif;
+    font-weight: 900;
+    font-size: clamp(36px, 5vw, 64px);
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+.section-title .italic {
+    font-style: italic;
+    font-weight: 300;
+    color: var(--accent);
+}
+
+/* 痛点 */
+.pain-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+}
+.pain-card {
+    background: var(--bg);
+    padding: 48px 36px;
+    transition: background 0.4s;
+    position: relative;
+}
+.pain-card:hover { background: var(--bg-card); }
+.pain-icon {
+    font-family: 'Fraunces', serif;
+    font-size: 48px;
+    font-weight: 300;
+    font-style: italic;
+    color: var(--crimson);
+    margin-bottom: 24px;
+    line-height: 1;
+}
+.pain-card h3 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 22px;
+    font-weight: 900;
+    margin-bottom: 16px;
+    letter-spacing: -0.01em;
+}
+.pain-card p {
+    color: var(--fg-muted);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+/* 功能矩阵 */
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 20px;
+}
+.feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 36px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.4s;
+}
+.feature:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+}
+.feature::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.5s;
+}
+.feature:hover::before { transform: scaleX(1); }
+.feature-large { grid-column: span 7; }
+.feature-medium { grid-column: span 5; }
+.feature-small { grid-column: span 4; }
+.feature-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    margin-bottom: 16px;
+}
+.feature h3 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 28px;
+    font-weight: 900;
+    margin-bottom: 16px;
+    line-height: 1.2;
+}
+.feature p {
+    color: var(--fg-muted);
+    font-size: 14px;
+    line-height: 1.7;
+    margin-bottom: 20px;
+}
+.feature-meta {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+.feature-meta span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--fg-muted);
+    padding: 4px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 100px;
+    letter-spacing: 0.05em;
+}
+
+/* 科学理论 */
+.science {
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+.science-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+    align-items: center;
+}
+.science-visual {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 40px;
+    display: flex; align-items: center; justify-content: center;
+}
+.forgetting-curve {
+    width: 100%; height: 100%;
+}
+.science-list { list-style: none; }
+.science-list li {
+    padding: 24px 0;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 24px;
+    align-items: start;
+}
+.science-list li:last-child { border-bottom: none; }
+.science-num {
+    font-family: 'Fraunces', serif;
+    font-size: 36px;
+    font-weight: 300;
+    font-style: italic;
+    color: var(--accent);
+    line-height: 1;
+}
+.science-list h4 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 18px;
+    font-weight: 900;
+    margin-bottom: 8px;
+}
+.science-list p {
+    color: var(--fg-muted);
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+/* 数据指标 */
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-top: 40px;
+}
+.metric {
+    background: var(--bg);
+    padding: 40px 28px;
+    text-align: left;
+}
+.metric-value {
+    font-family: 'Fraunces', serif;
+    font-size: 56px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--accent);
+    margin-bottom: 12px;
+    letter-spacing: -0.04em;
+}
+.metric-value .unit {
+    font-size: 20px;
+    color: var(--fg-muted);
+    font-weight: 400;
+    margin-left: 4px;
+}
+.metric-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* 用户场景 */
+.scenarios {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 40px;
+}
+.scenario {
+    padding: 48px;
+    border: 1px solid var(--border-strong);
+    position: relative;
+    background: var(--bg-card);
+    transition: all 0.4s;
+}
+.scenario:hover {
+    background: var(--bg-elevated);
+    border-color: var(--accent);
+}
+.scenario-quote {
+    font-family: 'Fraunces', 'Noto Serif SC', serif;
+    font-size: 24px;
+    font-style: italic;
+    font-weight: 300;
+    line-height: 1.4;
+    margin-bottom: 32px;
+    color: var(--fg);
+}
+.scenario-quote::before {
+    content: '"';
+    font-size: 64px;
+    color: var(--accent);
+    line-height: 0;
+    vertical-align: -16px;
+    margin-right: 8px;
+}
+.scenario-meta {
+    display: flex; justify-content: space-between;
+    align-items: center;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+.scenario-role {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+}
+.scenario-tags {
+    display: flex; gap: 8px;
+}
+.scenario-tags span {
+    font-size: 10px;
+    color: var(--fg-muted);
+    padding: 3px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 100px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* 技术栈 */
+.tech-stack {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 16px;
+}
+.tech-item {
+    padding: 24px 16px;
+    border: 1px solid var(--border);
+    text-align: center;
+    transition: all 0.3s;
+    background: var(--bg);
+}
+.tech-item:hover {
+    border-color: var(--accent);
+    background: var(--bg-card);
+    transform: translateY(-4px);
+}
+.tech-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 6px;
+}
+.tech-desc {
+    font-size: 10px;
+    color: var(--fg-muted);
+    letter-spacing: 0.05em;
+}
+
+/* 路线图 */
+.roadmap {
+    position: relative;
+    padding-left: 40px;
+}
+.roadmap::before {
+    content: '';
+    position: absolute;
+    left: 8px; top: 0; bottom: 0;
+    width: 1px;
+    background: var(--border-strong);
+}
+.roadmap-item {
+    position: relative;
+    padding: 24px 0 24px 32px;
+}
+.roadmap-item::before {
+    content: '';
+    position: absolute;
+    left: -36px; top: 32px;
+    width: 16px; height: 16px;
+    background: var(--bg);
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+}
+.roadmap-item.done::before {
+    background: var(--accent);
+}
+.roadmap-version {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+}
+.roadmap-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 20px;
+    font-weight: 900;
+    margin-bottom: 8px;
+}
+.roadmap-desc {
+    color: var(--fg-muted);
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+/* CTA */
+.cta {
+    text-align: center;
+    padding: 160px 5vw;
+    position: relative;
+    overflow: hidden;
+}
+.cta::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 60%);
+    filter: blur(40px);
+}
+.cta-content { position: relative; z-index: 2; }
+.cta h2 {
+    font-family: 'Fraunces', 'Noto Serif SC', serif;
+    font-size: clamp(48px, 7vw, 96px);
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    margin-bottom: 32px;
+}
+.cta h2 .italic {
+    font-style: italic;
+    font-weight: 300;
+    color: var(--accent);
+}
+.cta p {
+    font-size: 18px;
+    color: var(--fg-muted);
+    max-width: 600px;
+    margin: 0 auto 48px;
+    line-height: 1.7;
+}
+
+/* 页脚 */
+footer {
+    padding: 60px 5vw 40px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 24px;
+}
+.footer-info {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--fg-muted);
+    letter-spacing: 0.05em;
+    line-height: 1.8;
+}
+.footer-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 100px;
+    font-size: 10px;
+    margin-top: 8px;
+}
+
+/* 聊天小部件 */
+.chat-widget {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    z-index: 60;
+}
+.chat-toggle {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    cursor: pointer;
+    font-size: 22px;
+    box-shadow: 0 8px 24px var(--accent-glow);
+    transition: transform 0.3s;
+}
+.chat-toggle:hover { transform: scale(1.1) rotate(10deg); }
+.chat-panel {
+    position: absolute;
+    bottom: 72px; right: 0;
+    width: 340px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    overflow: hidden;
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform 0.3s;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+}
+.chat-panel.open { transform: scaleY(1); }
+.chat-header {
+    padding: 16px 20px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 15px;
+}
+.chat-body {
+    padding: 20px;
+    height: 320px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.6;
+}
+.chat-msg {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    max-width: 85%;
+}
+.chat-msg.bot {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+}
+.chat-msg.user {
+    background: var(--accent);
+    color: var(--bg);
+    margin-left: auto;
+}
+.chat-input {
+    display: flex;
+    border-top: 1px solid var(--border);
+}
+.chat-input input {
+    flex: 1;
+    padding: 12px 16px;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+}
+.chat-input button {
+    padding: 0 16px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+/* 响应式 */
+@media (max-width: 1024px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 120px; }
+    .hero-visual { height: auto; }
+    .section-header { grid-template-columns: 1fr; gap: 20px; }
+    .pain-grid { grid-template-columns: 1fr; }
+    .feature-large, .feature-medium, .feature-small { grid-column: span 12; }
+    .science-grid { grid-template-columns: 1fr; gap: 40px; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .scenarios { grid-template-columns: 1fr; }
+    .tech-stack { grid-template-columns: repeat(3, 1fr); }
+    .nav-links a:not(.theme-toggle) { display: none; }
+}
+@media (max-width: 600px) {
+    .section { padding: 80px 5vw; }
+    .metrics { grid-template-columns: 1fr; }
+    .tech-stack { grid-template-columns: repeat(2, 1fr); }
+    .chat-panel { width: calc(100vw - 48px); }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+    <div class="nav-logo">VoiceTrace</div>
+    <div class="nav-links">
+        <a href="#pain">痛点</a>
+        <a href="#features">功能</a>
+        <a href="#science">科学</a>
+        <a href="#scenarios">场景</a>
+        <a href="#tech">技术</a>
+        <button class="theme-toggle" onclick="toggleTheme()" aria-label="切换主题">◐</button>
+    </div>
+</nav>
+
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-tag">TRAE 黑客松参赛作品 · v3.4</div>
+        <h1>
+            让每一次<span class="italic">发声</span><br>
+            都被<span class="stroke">精准</span>追踪
+        </h1>
+        <p class="hero-sub">
+            VoiceTrace 声迹是一款面向播音主持专业学习者与演讲者的智能语音训练桌面系统。
+            集成录音分析、台风训练、AI 实时陪练与基于 FSRS-5 算法的科学背诵，
+            把"开口练 100 遍也不知道哪里不对"变成"每一秒都有数据反馈"。
+        </p>
+        <div class="hero-cta">
+            <a href="#features" class="btn btn-primary">探索功能 <span class="arrow">→</span></a>
+            <a href="#science" class="btn btn-ghost">科学原理</a>
+        </div>
+    </div>
+    <div class="hero-visual">
+        <div class="waveform-container">
+            <div class="waveform-header">
+                <span>RECORDING.WAV</span>
+                <span>00:02:47 · 16kHz</span>
+            </div>
+            <div class="waveform" id="waveform"></div>
+            <div class="waveform-stats">
+                <div class="stat-mini">
+                    <div class="stat-mini-label">语速</div>
+                    <div class="stat-mini-value accent">218<span style="font-size:14px;color:var(--fg-muted)"> 字/分</span></div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-label">卡顿</div>
+                    <div class="stat-mini-value">3<span style="font-size:14px;color:var(--fg-muted)"> 次</span></div>
+                </div>
+                <div class="stat-mini">
+                    <div class="stat-mini-label">台风</div>
+                    <div class="stat-mini-value accent">87<span style="font-size:14px;color:var(--fg-muted)"> 分</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="section" id="pain">
+    <div class="section-header">
+        <div class="section-number">01 / 痛点</div>
+        <h2 class="section-title">练了无数遍<br><span class="italic">仍不知问题在哪</span></h2>
+    </div>
+    <div class="pain-grid">
+        <div class="pain-card">
+            <div class="pain-icon">i.</div>
+            <h3>主观反馈失真</h3>
+            <p>传统语音训练依赖老师耳听手记，反馈滞后且主观。语速是否过快、停顿是否合理、卡顿出现在哪一句——全凭感觉，难以量化，更难复现对比。</p>
+        </div>
+        <div class="pain-card">
+            <div class="pain-icon">ii.</div>
+            <h3>台风训练缺位</h3>
+            <p>镜头感、眼神交流、肢体语言、表情管理——这些"软实力"在普通录音软件中完全不可见。学生对着镜子练，却看不到自己头偏了几度、手势是否过多。</p>
+        </div>
+        <div class="pain-card">
+            <div class="pain-icon">iii.</div>
+            <h3>背诵靠死记硬背</h3>
+            <p>演讲稿、主持词的背诵仍停留在"读 100 遍"的原始阶段。没有间隔重复、没有主动回忆、没有遗忘曲线追踪，效率低下且容易遗忘。</p>
+        </div>
+    </div>
+</section>
+
+<section class="section" id="features">
+    <div class="section-header">
+        <div class="section-number">02 / 功能</div>
+        <h2 class="section-title">六大模块<br><span class="italic">全流程闭环</span></h2>
+    </div>
+    <div class="feature-grid">
+        <div class="feature feature-large">
+            <div class="feature-tag">CORE · 智能分析</div>
+            <h3>字级强制对齐 + 韵律评估</h3>
+            <p>基于 faster-whisper 实现每个字/词的精确时间戳，标红漏读、慢读、快读；集成 Praat/Parselmouth 提取基频 F0、共振峰、强度、谐噪比 HNR，让"声音好不好听"变成可量化的指标。</p>
+            <div class="feature-meta">
+                <span>faster-whisper</span>
+                <span>Parselmouth</span>
+                <span>MFCC</span>
+                <span>WebRTC VAD</span>
+            </div>
+        </div>
+        <div class="feature feature-medium">
+            <div class="feature-tag">CORE · 台风训练</div>
+            <h3>MediaPipe 姿态分析</h3>
+            <p>站姿/坐姿双模式，6 维雷达图评分：眼神交流、表情管理、头部姿态、肩膀倾斜、身体稳定性、手势自然度。AI 实时点拨 + 整体总结。</p>
+            <div class="feature-meta">
+                <span>FaceLandmarker</span>
+                <span>PoseLandmarker</span>
+                <span>52 维 blendshapes</span>
+            </div>
+        </div>
+        <div class="feature feature-small">
+            <div class="feature-tag">NEW · 背诵训练</div>
+            <h3>FSRS-5 间隔重复</h3>
+            <p>基于记忆可检索性 R、稳定性 S、难度 D 三变量模型，动态调度复习间隔，比传统 SM-2 更精准。</p>
+            <div class="feature-meta">
+                <span>py-fsrs</span>
+                <span>主动回忆</span>
+            </div>
+        </div>
+        <div class="feature feature-small">
+            <div class="feature-tag">PRO · AI 陪练</div>
+            <h3>实时语音反馈</h3>
+            <p>边说边转写，每段话结束 AI 教练即时点评。支持 NVIDIA NIM / OpenAI / DeepSeek 多模型。</p>
+            <div class="feature-meta">
+                <span>Streaming STT</span>
+                <span>LLM</span>
+            </div>
+        </div>
+        <div class="feature feature-small">
+            <div class="feature-tag">PRO · 文案写作</div>
+            <h3>9 套专业模板</h3>
+            <p>新闻播报、即兴评述、模拟主持、演讲稿——AI 智能生成 + 本地模板兜底，无网络也能用。</p>
+            <div class="feature-meta">
+                <span>多模态</span>
+                <span>模板库</span>
+            </div>
+        </div>
+        <div class="feature feature-large">
+            <div class="feature-tag">NEW · 模拟演讲环境</div>
+            <h3>抗干扰记忆训练</h3>
+            <p>基于 NumPy 实时生成白噪音/粉噪音/棕噪音三种干扰背景音，模拟真实演讲现场。节奏训练根据卡片字数动态估算目标用时，实时提示"节奏偏慢/良好"。编码特异性原理：在接近真实情境中编码，增强提取线索。</p>
+            <div class="feature-meta">
+                <span>NumPy 信号生成</span>
+                <span>Qt Multimedia</span>
+                <span>节奏智能提示</span>
+            </div>
+        </div>
+        <div class="feature feature-medium">
+            <div class="feature-tag">NEW · 评估体系</div>
+            <h3>记忆效率指标 + A/B 测试</h3>
+            <p>保留率、遗忘率、平均稳定性、可检索性、复习耗时——五大指标量化记忆效率。支持 A/B 测试对比不同策略，AI 给出个性化改进建议。</p>
+            <div class="feature-meta">
+                <span>MemoryEvaluator</span>
+                <span>策略建议</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="section science" id="science">
+    <div class="section-header">
+        <div class="section-number">03 / 科学</div>
+        <h2 class="section-title">不是经验主义<br><span class="italic">是认知科学</span></h2>
+    </div>
+    <div class="science-grid">
+        <div class="science-visual">
+            <svg class="forgetting-curve" viewBox="0 0 400 400">
+                <defs>
+                    <linearGradient id="curveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:var(--accent);stop-opacity:1"/>
+                        <stop offset="100%" style="stop-color:var(--teal);stop-opacity:1"/>
+                    </linearGradient>
+                </defs>
+                <g stroke="var(--border)" stroke-width="1">
+                    <line x1="40" y1="40" x2="40" y2="360"/>
+                    <line x1="40" y1="360" x2="380" y2="360"/>
+                    <line x1="40" y1="120" x2="380" y2="120" stroke-dasharray="2,4"/>
+                    <line x1="40" y1="200" x2="380" y2="200" stroke-dasharray="2,4"/>
+                    <line x1="40" y1="280" x2="380" y2="280" stroke-dasharray="2,4"/>
+                </g>
+                <path d="M 40 60 Q 80 200 120 280 T 200 330 T 280 345 T 380 350"
+                      fill="none" stroke="var(--fg-muted)" stroke-width="2" stroke-dasharray="4,4"/>
+                <path d="M 40 60 Q 100 90 160 110 T 280 140 T 380 150"
+                      fill="none" stroke="url(#curveGrad)" stroke-width="3"/>
+                <circle cx="40" cy="60" r="6" fill="var(--accent)"/>
+                <circle cx="120" cy="180" r="5" fill="var(--accent)"/>
+                <circle cx="200" cy="240" r="5" fill="var(--teal)"/>
+                <circle cx="280" cy="280" r="5" fill="var(--teal)"/>
+                <circle cx="380" cy="300" r="5" fill="var(--teal)"/>
+                <text x="50" y="55" fill="var(--accent)" font-family="JetBrains Mono" font-size="11">100%</text>
+                <text x="50" y="380" fill="var(--fg-muted)" font-family="JetBrains Mono" font-size="10">第1天</text>
+                <text x="170" y="380" fill="var(--fg-muted)" font-family="JetBrains Mono" font-size="10">第7天</text>
+                <text x="290" y="380" fill="var(--fg-muted)" font-family="JetBrains Mono" font-size="10">第30天</text>
+                <text x="340" y="200" fill="var(--fg-muted)" font-family="JetBrains Mono" font-size="9">无复习</text>
+                <text x="280" y="130" fill="var(--accent)" font-family="JetBrains Mono" font-size="9">FSRS-5</text>
+            </svg>
+        </div>
+        <ul class="science-list">
+            <li>
+                <div class="science-num">01</div>
+                <div>
+                    <h4>艾宾浩斯遗忘曲线 + FSRS-5</h4>
+                    <p>基于记忆的可检索性（R）、稳定性（S）、难度（D）三变量模型动态调度复习间隔，比传统 SM-2 算法预测精度提升约 15%。</p>
+                </div>
+            </li>
+            <li>
+                <div class="science-num">02</div>
+                <div>
+                    <h4>主动回忆 + 测试效应</h4>
+                    <p>训练流程强制用户主动提取信息（默写模式），而非被动重读。研究证实此方式记忆巩固效率提升约 50%（Roediger & Karpicke, 2006）。</p>
+                </div>
+            </li>
+            <li>
+                <div class="science-num">03</div>
+                <div>
+                    <h4>工作记忆组块化</h4>
+                    <p>基于米勒 7±2 理论，自动将演讲稿按逻辑结构拆分为 60-90 秒的记忆组块，避免认知过载。</p>
+                </div>
+            </li>
+            <li>
+                <div class="science-num">04</div>
+                <div>
+                    <h4>编码特异性原理</h4>
+                    <p>支持模拟演讲环境（干扰背景音），在接近真实情境中编码以增强提取线索（Tulving & Thomson, 1973）。</p>
+                </div>
+            </li>
+        </ul>
+    </div>
+</section>
+
+<section class="section" id="scenarios">
+    <div class="section-header">
+        <div class="section-number">04 / 场景</div>
+        <h2 class="section-title">谁在用它<br><span class="italic">改变自己</span></h2>
+    </div>
+    <div class="scenarios">
+        <div class="scenario">
+            <p class="scenario-quote">以前练新闻播报，老师听完只能说"再快点"。现在我能看到每一句的语速曲线，卡顿精确到第几秒，进步看得见。</p>
+            <div class="scenario-meta">
+                <span class="scenario-role">播音主持 · 大二学生</span>
+                <div class="scenario-tags">
+                    <span>语速分析</span>
+                    <span>字级对齐</span>
+                </div>
+            </div>
+        </div>
+        <div class="scenario">
+            <p class="scenario-quote">演讲比赛前一周，我用背诵训练把稿子拆成 12 张卡片，FSRS 算法告诉我今天该复习哪几张。上台时一个字都没忘。</p>
+            <div class="scenario-meta">
+                <span class="scenario-role">演讲参赛者</span>
+                <div class="scenario-tags">
+                    <span>FSRS-5</span>
+                    <span>主动回忆</span>
+                </div>
+            </div>
+        </div>
+        <div class="scenario">
+            <p class="scenario-quote">AI 实时陪练太香了。我练即兴评述，说完一段它立刻告诉我"论点不清晰，建议先说结论"，比等老师批改快 10 倍。</p>
+            <div class="scenario-meta">
+                <span class="scenario-role">艺考集训生</span>
+                <div class="scenario-tags">
+                    <span>AI 陪练</span>
+                    <span>实时反馈</span>
+                </div>
+            </div>
+        </div>
+        <div class="scenario">
+            <p class="scenario-quote">台风训练让我第一次"看见"自己的体态问题——头偏了 8 度、手势过多、眼神飘忽。6 维雷达图一目了然。</p>
+            <div class="scenario-meta">
+                <span class="scenario-role">主持新人</span>
+                <div class="scenario-tags">
+                    <span>MediaPipe</span>
+                    <span>姿态分析</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="metrics">
+        <div class="metric">
+            <div class="metric-value">6<span class="unit">大</span></div>
+            <div class="metric-label">核心功能模块</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">3<span class="unit">种</span></div>
+            <div class="metric-label">训练模式（预览/提示/默写）</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">50<span class="unit">%</span></div>
+            <div class="metric-label">主动回忆效率提升</div>
+        </div>
+        <div class="metric">
+            <div class="metric-value">15<span class="unit">%</span></div>
+            <div class="metric-label">FSRS-5 vs SM-2 精度提升</div>
+        </div>
+    </div>
+</section>
+
+<section class="section" id="tech">
+    <div class="section-header">
+        <div class="section-number">05 / 技术</div>
+        <h2 class="section-title">工程实现<br><span class="italic">不堆砌 不妥协</span></h2>
+    </div>
+    <div class="tech-stack">
+        <div class="tech-item">
+            <div class="tech-name">PySide6</div>
+            <div class="tech-desc">桌面框架</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">faster-whisper</div>
+            <div class="tech-desc">字级对齐</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">MediaPipe</div>
+            <div class="tech-desc">姿态分析</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">Parselmouth</div>
+            <div class="tech-desc">韵律提取</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">py-fsrs</div>
+            <div class="tech-desc">间隔重复</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">librosa</div>
+            <div class="tech-desc">音频特征</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">NumPy</div>
+            <div class="tech-desc">信号生成</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">SQLite</div>
+            <div class="tech-desc">本地存储</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">WebRTC VAD</div>
+            <div class="tech-desc">语音活动检测</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">OpenAI兼容</div>
+            <div class="tech-desc">多模型 LLM</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">jieba</div>
+            <div class="tech-desc">中文分词</div>
+        </div>
+        <div class="tech-item">
+            <div class="tech-name">Matplotlib</div>
+            <div class="tech-desc">数据可视化</div>
+        </div>
+    </div>
+
+    <div class="roadmap" style="margin-top:80px;">
+        <div class="roadmap-item done">
+            <div class="roadmap-version">v1.0 · 2024</div>
+            <div class="roadmap-title">基础录音与分析</div>
+            <div class="roadmap-desc">稿件管理、WAV 录音、语速/卡顿/能量分析、数据导出</div>
+        </div>
+        <div class="roadmap-item done">
+            <div class="roadmap-version">v2.0 · 2025 Q1</div>
+            <div class="roadmap-title">台风训练 + 文案写作</div>
+            <div class="roadmap-desc">MediaPipe 面部/姿态分析、AI 文案生成、跟读模式</div>
+        </div>
+        <div class="roadmap-item done">
+            <div class="roadmap-version">v3.0 · 2025 Q2</div>
+            <div class="roadmap-title">字级对齐 + 韵律评估</div>
+            <div class="roadmap-desc">faster-whisper 强制对齐、Praat 韵律特征、实时 AI 陪练</div>
+        </div>
+        <div class="roadmap-item done">
+            <div class="roadmap-version">v3.3 · 2025 Q2</div>
+            <div class="roadmap-title">AI 统一配置 + 双模式</div>
+            <div class="roadmap-desc">简单/专业双模式、文本/多模态 LLM 切换、AI 实时点拨</div>
+        </div>
+        <div class="roadmap-item done">
+            <div class="roadmap-version">v3.4 · 2025 Q2 · 本届黑客松</div>
+            <div class="roadmap-title">科学背诵训练系统</div>
+            <div class="roadmap-desc">FSRS-5 间隔重复、内容分析引擎、模拟演讲环境、评估体系</div>
+        </div>
+        <div class="roadmap-item">
+            <div class="roadmap-version">v4.0 · 规划中</div>
+            <div class="roadmap-title">云端同步 + 协作训练</div>
+            <div class="roadmap-desc">小组互考、模拟演讲房间、跨设备进度同步</div>
+        </div>
+    </div>
+</section>
+
+<section class="cta">
+    <div class="cta-content">
+        <h2>让声音<br><span class="italic">被看见</span></h2>
+        <p>VoiceTrace 不只是录音软件，它是把认知科学、计算机视觉、语音识别融为一体的训练伙伴。每一次开口，都离专业更近一步。</p>
+        <a href="https://github.com/zs936073909/VoiceTrace" class="btn btn-primary">查看 GitHub 仓库 <span class="arrow">→</span></a>
+    </div>
+</section>
+
+<footer>
+    <div class="footer-info">
+        VoiceTrace 声迹 · 智能语音档案追踪系统 v3.4<br>
+        字节跳动 Trae 编程黑客松参赛作品 · 基于 Trae Kimi Code 2.7 制作<br>
+        <span class="footer-badge">MIT License</span>
+    </div>
+    <div class="footer-info" style="text-align:right;">
+        Built with PySide6 · faster-whisper · MediaPipe · py-fsrs<br>
+        © 2025 VoiceTrace Project
+    </div>
+</footer>
+
+<div class="chat-widget">
+    <div class="chat-panel" id="chatPanel">
+        <div class="chat-header">声迹助手 · 关于本作品</div>
+        <div class="chat-body" id="chatBody">
+            <div class="chat-msg bot">你好！我是 VoiceTrace 的导览助手。想了解这个作品的什么？可以问我：痛点、功能、科学原理、技术栈。</div>
+        </div>
+        <div class="chat-input">
+            <input type="text" id="chatInput" placeholder="输入问题..." onkeypress="if(event.key==='Enter')sendChat()">
+            <button onclick="sendChat()">发送</button>
+        </div>
+    </div>
+    <button class="chat-toggle" onclick="toggleChat()" aria-label="打开助手">?</button>
+</div>
+
+<script>
+// 主题切换
+function toggleTheme() {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme');
+    html.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    localStorage.setItem('vt-theme', html.getAttribute('data-theme'));
+}
+(function() {
+    const saved = localStorage.getItem('vt-theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+})();
+
+// 波形条生成
+const wave = document.getElementById('waveform');
+const barCount = 48;
+for (let i = 0; i < barCount; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'wave-bar';
+    bar.style.animationDelay = (i * 0.04) + 's';
+    bar.style.height = (20 + Math.random() * 80) + '%';
+    wave.appendChild(bar);
+}
+
+// 聊天小部件
+function toggleChat() {
+    document.getElementById('chatPanel').classList.toggle('open');
+}
+const knowledge = [
+    { k: ['痛点', '问题', '解决'], a: 'VoiceTrace 解决三大痛点：1) 传统语音训练反馈主观滞后，无法量化；2) 台风训练（镜头感、肢体语言）在普通录音软件中不可见；3) 演讲稿背诵仍靠死记硬背，缺乏科学算法支撑。' },
+    { k: ['功能', '模块', '能做'], a: '六大核心模块：稿件管理、专业录音、智能分析（字级对齐+韵律）、台风训练（MediaPipe）、背诵训练（FSRS-5）、AI 实时陪练。专业模式还有跟读对比、数据导出。' },
+    { k: ['科学', '理论', 'fsrs', '记忆'], a: '整合四大认知科学理论：艾宾浩斯遗忘曲线 + FSRS-5 间隔重复算法、主动回忆与测试效应、工作记忆组块化（米勒 7±2）、编码特异性原理。研究证实主动回忆比被动重读效率提升约 50%。' },
+    { k: ['技术', '栈', '实现', '框架'], a: '技术栈：PySide6 桌面框架、faster-whisper 字级对齐、MediaPipe 姿态分析、Parselmouth 韵律提取、py-fsrs 间隔重复、librosa 音频特征、SQLite 本地存储。纯 Python 实现，无需服务端。' },
+    { k: ['场景', '用户', '谁用'], a: '核心用户：播音主持专业学生、演讲参赛者、艺考集训生、主持新人。场景包括新闻播报训练、即兴评述练习、演讲稿背诵、台风矫正、实时 AI 点评。' },
+    { k: ['trae', '黑客松', '比赛'], a: '这是字节跳动 Trae 编程黑客松参赛作品。v3.4 背诵训练模块完全基于 Trae Kimi Code 2.7 开发，包括 FSRS-5 调度引擎、内容分析器、评估体系等核心模块。' },
+    { k: ['下载', '安装', 'github'], a: '项目开源在 GitHub：github.com/zs936073909/VoiceTrace。本地运行：pip install -r requirements.txt && python main.py。支持 Windows/macOS/Linux。' }
+];
+function sendChat() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const body = document.getElementById('chatBody');
+    body.innerHTML += '<div class="chat-msg user">' + text.replace(/</g,'&lt;') + '</div>';
+    input.value = '';
+    body.scrollTop = body.scrollHeight;
+    setTimeout(() => {
+        const lower = text.toLowerCase();
+        let reply = '这个问题我还在学习中。你可以问我：痛点、功能、科学原理、技术栈、使用场景、比赛信息。';
+        for (const item of knowledge) {
+            if (item.k.some(kw => lower.includes(kw))) { reply = item.a; break; }
+        }
+        body.innerHTML += '<div class="chat-msg bot">' + reply + '</div>';
+        body.scrollTop = body.scrollHeight;
+    }, 500);
+}
+</script>
+</body>
+</html>
