@@ -161,11 +161,11 @@ VoiceTrace 声迹是一款专为播音主持专业学生及语音训练需求者
 
 ## 快速开始
 
-### 方式一：使用便携版（推荐普通用户）
+### 方式一：一键启动（推荐普通用户）
 
-1. 前往 [Releases](../../releases) 下载最新的 `VoiceTrace-v3.1.0-portable.zip`
+1. 前往 [Releases](../../releases) 下载最新的 `VoiceTrace-v3.4-portable.zip`
 2. 解压到任意目录
-3. 双击 `VoiceTrace.exe` 运行
+3. 双击 `VoiceTrace.exe` 即可运行，无需安装 Python
 
 ### 方式二：从源码运行（推荐开发者）
 
@@ -182,6 +182,21 @@ python main.py
 ```
 
 **系统要求**：Python 3.10+，Windows 10/11 64 位
+
+### 从源码打包成可执行文件
+
+```bash
+# 1. 安装打包依赖（requirements.txt 已包含 pyinstaller）
+pip install -r requirements.txt
+
+# 2. 执行打包脚本
+python build_windows.py
+
+# 3. 输出位置
+# dist/VoiceTrace/VoiceTrace.exe
+```
+
+打包完成后，`dist/VoiceTrace` 就是便携版文件夹，可直接压缩分发。
 
 ## v3.0 新增功能详解
 
@@ -290,7 +305,10 @@ voicetrace/
 │   ├── llm_service.py         # 统一 LLM/多模态服务层
 │   ├── llm_config_manager.py  # 全局 LLM 配置管理
 │   ├── feedback_generator.py  # 分析结果 → AI 建议
-│   └── script_writer.py       # 文案生成
+│   ├── script_writer.py       # 文案生成
+│   ├── memory_scheduler.py    # FSRS-5 间隔重复调度引擎（v3.4）
+│   ├── content_analyzer.py    # 背诵内容分析与组块化（v3.4）
+│   └── memory_evaluator.py    # 记忆效率评估与 A/B 测试（v3.4）
 ├── data/                      # 数据层
 │   ├── database.py            # SQLite CRUD
 │   └── models.py              # 数据模型
@@ -308,6 +326,7 @@ voicetrace/
 │   ├── posture_view.py        # 台风训练视图
 │   ├── radar_chart.py         # 雷达图组件
 │   ├── script_writer_view.py  # 文案写作界面
+│   ├── memory_assist_view.py  # 背诵训练视图（v3.4）
 │   └── styles.py              # QSS 样式（浅色/深色）
 ├── utils/                     # 工具
 │   ├── audio.py               # 中英文字数统计
@@ -320,7 +339,11 @@ voicetrace/
 │   ├── test_prosody.py           # 韵律分析测试
 │   ├── test_alignment.py         # 强制对齐测试
 │   ├── test_robustness.py        # 稳定性测试
-│   └── test_posture_ai_coach.py  # 台风训练 AI 教练测试
+│   ├── test_posture_ai_coach.py  # 台风训练 AI 教练测试
+│   ├── test_p0_smoke.py          # 背诵模块冒烟测试（v3.4）
+│   ├── test_memory_assist.py     # 背诵训练集成测试（v3.4）
+│   ├── test_memory_evaluator.py  # 记忆评估测试（v3.4）
+│   └── test_main_window_integration.py  # 主窗口集成测试（v3.4）
 └── models/                    # MediaPipe 模型文件
     ├── face_landmarker.task
     └── pose_landmarker_lite.task
@@ -354,4 +377,5 @@ MIT License — 可自由使用、修改、分发
 - 基于 mimicode 2.5pro 开发第一版，trae glm5.2 开发第二版以及架构优化
 - 第三版（韵律分析、强制对齐、台风训练、AI 统一配置与教练、稳定性优化）由 trae Kimi Code 2.7 制作
 - v3.4 背诵训练模块（FSRS-5 间隔重复算法、内容分析引擎、记忆卡片系统）由 trae Kimi Code 2.7 制作
+- v3.4 性能优化（台风训练 MediaPipe 模型后台预加载、资源释放优化、PyInstaller 一键打包）由 trae Kimi Code 2.7 制作
 - 所有开源依赖库的作者

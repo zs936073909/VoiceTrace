@@ -4,6 +4,7 @@
 提供实时反馈和训练后综合评分。
 """
 import json
+import threading
 import time
 from typing import Optional
 
@@ -19,8 +20,6 @@ from PySide6.QtGui import QFont, QColor
 from voicetrace.data.models import PostureRecord
 from voicetrace.ui.camera_view import CameraView
 from voicetrace.ui.radar_chart import RadarChart
-import threading
-import time
 
 from voicetrace.core.llm_config_manager import get_llm_config_manager
 from voicetrace.ui.llm_settings_dialog import show_llm_settings
@@ -61,10 +60,18 @@ class PostureView(QWidget):
         self._tip_worker_running = False
         self._ai_mode = self.llm_manager.get_ai_mode()
 
+        # 分析器后台预加载
+        self._analyzers_ready = False
+        self._init_worker_running = False
+        self._init_error = ""
+
         self._init_ui()
 
         if not MEDIAPIPE_AVAILABLE:
             self._show_mediapipe_warning()
+        else:
+            # 后台预加载 MediaPipe 模型，避免点击"开始训练"时卡住
+            self._warmup_analyzers_async()
 
     def _show_mediapipe_warning(self):
         """显示 MediaPipe 未安装警告"""
@@ -85,6 +92,70 @@ class PostureView(QWidget):
         """)
         warning.setAlignment(Qt.AlignCenter)
         self.layout().insertWidget(0, warning)
+
+    def _warmup_analyzers_async(self):
+        """后台预加载分析器，避免 UI 卡顿"""
+        if self._init_worker_running or self._analyzers_ready:
+            return
+        self._init_worker_running = True
+        self.feedback_label.setText("正在加载 MediaPipe 模型，请稍候...")
+        thread = threading.Thread(target=self._init_analyzers_worker, daemon=True)
+        thread.start()
+
+    def _init_analyzers_worker(self):
+        """在工作线程中初始化分析器"""
+        try:
+            face = PostureAnalyzer()
+            face.initialize()
+            pose = PoseAnalyzer(mode="sitting")
+            pose.initialize()
+            self._posture_analyzer = face
+            self._pose_analyzer = pose
+            self._analyzers_ready = True
+            # 回到主线程更新 UI
+            QTimer.singleShot(0, self._on_analyzers_ready)
+        except Exception as exc:
+            self._init_error = str(exc)
+            QTimer.singleShot(0, lambda: self._on_analyzers_error(str(exc)))
+        finally:
+            self._init_worker_running = False
+
+    def _on_analyzers_ready(self):
+        """分析器准备就绪"""
+        self.feedback_label.setText("模型加载完成，点击「开始训练」即可开始")
+
+    def _on_analyzers_error(self, error: str):
+        """分析器初始化失败"""
+        self.feedback_label.setText(f"模型加载失败: {error}")
+        QMessageBox.warning(self, "模型加载失败", f"MediaPipe 模型加载失败:\n{error}")
+
+    def _ensure_analyzers(self) -> bool:
+        """确保分析器已初始化，必要时阻塞等待"""
+        if self._analyzers_ready and self._posture_analyzer and self._pose_analyzer:
+            # 根据当前模式更新姿态分析器
+            mode = "standing" if self.mode_combo.currentIndex() == 1 else "sitting"
+            self._pose_analyzer.set_mode(mode)
+            return True
+
+        if self._init_worker_running:
+            QMessageBox.information(
+                self, "模型加载中",
+                "MediaPipe 模型正在后台加载，请稍候几秒后再试。"
+            )
+            return False
+
+        # 尝试同步初始化（兜底）
+        try:
+            self._posture_analyzer = PostureAnalyzer()
+            self._posture_analyzer.initialize()
+            mode = "standing" if self.mode_combo.currentIndex() == 1 else "sitting"
+            self._pose_analyzer = PoseAnalyzer(mode=mode)
+            self._pose_analyzer.initialize()
+            self._analyzers_ready = True
+            return True
+        except Exception as exc:
+            QMessageBox.warning(self, "初始化失败", f"无法加载台风训练模型:\n{exc}")
+            return False
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -288,14 +359,13 @@ class PostureView(QWidget):
 
     def _start_training(self):
         """开始训练"""
-        # 初始化分析器
-        try:
-            self._posture_analyzer = PostureAnalyzer()
-            mode = "standing" if self.mode_combo.currentIndex() == 1 else "sitting"
-            self._pose_analyzer = PoseAnalyzer(mode=mode)
-        except ImportError as e:
-            QMessageBox.warning(self, "初始化失败", str(e))
+        # 确保分析器已就绪（使用预加载或同步初始化兜底）
+        if not self._ensure_analyzers():
             return
+
+        # 重置分析器状态（保留已加载的模型）
+        self._posture_analyzer.reset_state()
+        self._pose_analyzer.reset_state()
 
         # 启动摄像头
         camera_idx = self.camera_combo.currentIndex()
@@ -331,14 +401,15 @@ class PostureView(QWidget):
             QTimer.singleShot(duration * 1000, self._stop_training)
 
     def _stop_training(self):
-        """停止训练"""
+        """停止训练（保留分析器模型，便于快速再次开始）"""
         self._feedback_timer.stop()
         self.camera_view.stop()
 
+        # 只重置状态，不关闭底层模型，避免重复加载导致卡顿
         if self._posture_analyzer:
-            self._posture_analyzer.close()
+            self._posture_analyzer.reset_state()
         if self._pose_analyzer:
-            self._pose_analyzer.close()
+            self._pose_analyzer.reset_state()
 
         self._is_training = False
         self.start_btn.setText("开始训练")
@@ -613,3 +684,20 @@ class PostureView(QWidget):
     def set_theme(self, theme: str):
         """设置主题"""
         self.radar_chart.set_theme(theme)
+
+    def closeEvent(self, event):
+        """关闭视图时彻底释放摄像头和分析器资源，避免应用卡死"""
+        try:
+            self._stop_training()
+            self.camera_view.stop()
+            if self._posture_analyzer:
+                self._posture_analyzer.close()
+                self._posture_analyzer = None
+            if self._pose_analyzer:
+                self._pose_analyzer.close()
+                self._pose_analyzer = None
+        except Exception as exc:
+            # 释放资源失败不应阻止窗口关闭
+            import logging
+            logging.getLogger(__name__).warning(f"台风视图关闭时释放资源失败: {exc}")
+        event.accept()
